@@ -2,10 +2,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   AlertTriangle,
+  Box,
   Check,
   ChevronRight,
   Copy,
-  Cpu,
   Download,
   ExternalLink,
   FileText,
@@ -43,6 +43,7 @@ const props = defineProps<{
 
 const mountsStore = useMountsStore()
 
+type NavSection = 'containers' | 'register'
 type PrepareTab = 'upload' | 'mount'
 
 interface InstanceDraft {
@@ -80,6 +81,7 @@ const TEMPLATE_OPTIONS: readonly {
 
 const ARCHIVE_SUFFIXES: readonly string[] = ['.tar.gz', '.tar.xz', '.tgz', '.zip', '.tar']
 
+const activeSection = ref<NavSection>('containers')
 const loadedOnce = ref(false)
 const loadingList = ref(false)
 const dockerAvailable = ref(true)
@@ -331,6 +333,7 @@ async function prepareFromUpload(file: File): Promise<void> {
     })
     prepareName.value = ''
     upsertInstance(created, true)
+    activeSection.value = 'containers'
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '압축 파일 분석에 실패했습니다.'
   } finally {
@@ -373,6 +376,7 @@ async function prepareFromMountSource(params: {
     })
     prepareName.value = ''
     upsertInstance(created, true)
+    activeSection.value = 'containers'
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '마운트 경로 워게임 준비에 실패했습니다.'
   } finally {
@@ -465,6 +469,13 @@ async function ensureMountRootsLoaded(): Promise<void> {
   }
 }
 
+function selectNavSection(section: NavSection): void {
+  activeSection.value = section
+  if (section === 'register' && prepareTab.value === 'mount' && mountRoots.value.length === 0) {
+    void ensureMountRootsLoaded()
+  }
+}
+
 function switchPrepareTab(tab: PrepareTab): void {
   prepareTab.value = tab
   if (tab === 'mount' && mountRoots.value.length === 0) {
@@ -512,6 +523,7 @@ watch(
     const src = props.launchSource
     if (nonce === undefined || !src || lastHandledNonce.value === nonce) return
     lastHandledNonce.value = nonce
+    activeSection.value = 'containers'
     void prepareFromMountSource({
       rootId: src.rootId,
       relPath: src.relPath,
@@ -710,18 +722,37 @@ function statusLabel(status: WargameStatus): string {
   }
 }
 
-function statusBadgeClass(status: WargameStatus): string {
+function statusDotClass(status: WargameStatus): string {
   switch (status) {
-    case 'detected':
-      return 'border-sky-400/30 bg-sky-500/15 text-sky-300'
-    case 'building':
-      return 'border-amber-400/30 bg-amber-500/15 text-amber-200'
     case 'running':
-      return 'border-emerald-400/30 bg-emerald-500/15 text-emerald-300'
+      return 'bg-[#10b981]'
+    case 'detected':
+      return 'bg-[#0572ec]'
+    case 'building':
+      return 'bg-[#f59e0b] animate-pulse'
     case 'stopped':
-      return 'border-slate-400/30 bg-slate-500/15 text-slate-300'
+      return 'bg-[#94a3b8]'
     case 'failed':
-      return 'border-rose-400/30 bg-rose-500/15 text-rose-300'
+      return 'bg-[#e11d48]'
+    default: {
+      const _exhaustive: never = status
+      return _exhaustive
+    }
+  }
+}
+
+function statusTextClass(status: WargameStatus): string {
+  switch (status) {
+    case 'running':
+      return 'text-[#059669]'
+    case 'detected':
+      return 'text-[#0058cc]'
+    case 'building':
+      return 'text-[#b45309]'
+    case 'stopped':
+      return 'text-[#64748b]'
+    case 'failed':
+      return 'text-[#be123c]'
     default: {
       const _exhaustive: never = status
       return _exhaustive
@@ -768,659 +799,767 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="relative flex h-full w-full flex-col overflow-y-auto p-4 text-xs text-slate-200">
-    <div
-      v-if="loadedOnce && !dockerAvailable"
-      class="mb-4 flex items-start gap-2.5 rounded-2xl border border-amber-400/35 bg-amber-500/15 px-4 py-3 text-amber-100"
-    >
-      <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
-      <div class="min-w-0 flex-1">
-        <div class="font-semibold text-amber-200">Docker 데몬에 연결할 수 없습니다</div>
-        <p class="mt-0.5 break-all font-mono text-[11px] text-amber-200/85">
-          {{ dockerError || '호스트에서 Docker 서비스 상태 및 소켓 권한을 확인하세요.' }}
-        </p>
+  <div class="relative flex h-full w-full overflow-hidden bg-[#f4f6f9] text-[12px] text-[#1e293b]">
+    <aside class="flex w-44 shrink-0 flex-col justify-between border-r border-[#dce2ea] bg-[#f5f7fa] px-2 py-2.5">
+      <div class="flex flex-col gap-1">
+        <button
+          type="button"
+          class="flex items-center justify-between rounded-[4px] px-2.5 py-2 text-left text-[12px] transition"
+          :class="
+            activeSection === 'containers'
+              ? 'bg-[#e6f0ff] font-semibold text-[#0058cc]'
+              : 'text-[#334155] hover:bg-[#eaeef4]'
+          "
+          @click="selectNavSection('containers')"
+        >
+          <span class="flex items-center gap-2 truncate">
+            <Box class="h-4 w-4 shrink-0" />
+            <span class="truncate">컨테이너 현황</span>
+          </span>
+          <span
+            class="ml-1 shrink-0 rounded-[3px] px-1.5 py-0.5 font-mono text-[11px]"
+            :class="
+              activeSection === 'containers'
+                ? 'bg-[#d0e3ff] text-[#0058cc]'
+                : 'bg-[#e2e8f0] text-[#475569]'
+            "
+          >
+            {{ instances.length }}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          class="flex items-center gap-2 rounded-[4px] px-2.5 py-2 text-left text-[12px] transition"
+          :class="
+            activeSection === 'register'
+              ? 'bg-[#e6f0ff] font-semibold text-[#0058cc]'
+              : 'text-[#334155] hover:bg-[#eaeef4]'
+          "
+          @click="selectNavSection('register')"
+        >
+          <Plus class="h-4 w-4 shrink-0" />
+          <span class="truncate">새 워게임 등록</span>
+        </button>
       </div>
-    </div>
 
-    <div
-      v-if="errorMessage"
-      class="mb-4 flex items-center justify-between gap-2 rounded-xl border border-rose-500/30 bg-rose-500/15 px-3.5 py-2.5 text-rose-200"
-    >
-      <span>{{ errorMessage }}</span>
-      <button
-        type="button"
-        class="rounded p-0.5 text-rose-300 hover:bg-white/10"
-        @click="errorMessage = ''"
+      <div class="space-y-1 border-t border-[#dce2ea] px-2 pt-2.5 text-[11px]">
+        <div v-if="!loadedOnce" class="text-[#64748b]">● Docker 상태 확인 중</div>
+        <div v-else-if="dockerAvailable" class="font-semibold text-[#059669]">
+          ● Docker 정상
+        </div>
+        <div v-else class="font-semibold text-[#dc2626]">
+          ● 연결 안 됨
+        </div>
+
+        <div
+          v-if="defaultBindIp"
+          class="truncate font-mono text-[10px] text-[#64748b]"
+          :title="`바인딩 IP ${defaultBindIp}`"
+        >
+          바인딩 IP {{ defaultBindIp }}
+        </div>
+      </div>
+    </aside>
+
+    <div class="min-w-0 flex-1 space-y-3 overflow-y-auto bg-[#f4f6f9] p-4 text-[12px] text-[#1e293b]">
+      <div
+        v-if="loadedOnce && !dockerAvailable"
+        class="flex items-start gap-2.5 rounded-[4px] border border-[#fde68a] bg-[#fffbeb] px-3.5 py-2.5 text-[#92400e]"
       >
-        <X class="h-3.5 w-3.5" />
-      </button>
-    </div>
+        <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-[#d97706]" />
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold text-[#92400e]">Docker 데몬에 연결할 수 없습니다</div>
+          <p class="mt-0.5 break-all font-mono text-[11px] text-[#92400e]">
+            {{ dockerError || '호스트에서 Docker 서비스 상태 및 소켓 권한을 확인하세요.' }}
+          </p>
+        </div>
+      </div>
 
-    <section class="mb-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div class="flex items-center gap-1.5 rounded-xl bg-slate-900 p-1">
+      <div
+        v-if="errorMessage"
+        class="flex items-center justify-between gap-2 rounded-[4px] border border-[#fecdd3] bg-[#fff1f2] px-3.5 py-2 text-[#be123c]"
+      >
+        <span>{{ errorMessage }}</span>
+        <button
+          type="button"
+          class="rounded-[4px] p-0.5 text-[#be123c] hover:bg-[#ffe4e6]"
+          @click="errorMessage = ''"
+        >
+          <X class="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div
+        v-if="preparing && activeSection === 'containers'"
+        class="flex items-center gap-2 rounded-[4px] border border-[#b8d4fe] bg-[#eff6ff] px-3.5 py-2 text-[#0058cc]"
+      >
+        <RefreshCw class="h-3.5 w-3.5 animate-spin text-[#0572ec]" />
+        <span>워게임 소스를 분석하고 인스턴스를 준비하고 있습니다...</span>
+      </div>
+
+      <section
+        v-if="activeSection === 'register'"
+        class="space-y-3.5 rounded-[6px] border border-[#dce2ea] bg-white p-4 shadow-2xs"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-[13px] font-semibold text-[#1e293b]">새 워게임 등록</h3>
+            <p class="mt-0.5 text-[11px] text-[#64748b]">
+              문제 압축 파일을 업로드하거나 공유 폴더의 디렉토리·아카이브를 선택해 컨테이너를 준비합니다.
+            </p>
+          </div>
+
+          <input
+            v-model="prepareName"
+            type="text"
+            placeholder="표시 이름 (선택)"
+            class="dsm-input w-48"
+          />
+        </div>
+
+        <div class="flex items-center gap-5 border-b border-[#dce2ea]">
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-semibold transition"
+            class="-mb-px inline-flex items-center gap-1.5 border-b-2 pb-2 text-[12px] font-semibold transition"
             :class="
               prepareTab === 'upload'
-                ? 'bg-violet-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'border-[#0572ec] text-[#0572ec]'
+                : 'border-transparent text-[#64748b] hover:text-[#1e293b]'
             "
             @click="switchPrepareTab('upload')"
           >
             <Upload class="h-3.5 w-3.5" />
             압축 파일 업로드
           </button>
+
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-semibold transition"
+            class="-mb-px inline-flex items-center gap-1.5 border-b-2 pb-2 text-[12px] font-semibold transition"
             :class="
               prepareTab === 'mount'
-                ? 'bg-violet-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'border-[#0572ec] text-[#0572ec]'
+                : 'border-transparent text-[#64748b] hover:text-[#1e293b]'
             "
             @click="switchPrepareTab('mount')"
           >
             <HardDrive class="h-3.5 w-3.5" />
-            마운트 폴더/파일 선택
+            공유 폴더에서 선택
           </button>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <input
-            v-model="prepareName"
-            type="text"
-            placeholder="표시 이름 (선택)"
-            class="w-44 rounded-xl border border-white/10 bg-slate-900 px-3 py-1.5 text-xs text-white focus:border-violet-400 focus:outline-none"
-          />
-        </div>
-      </div>
-
-      <div
-        v-if="prepareTab === 'upload'"
-        class="flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-6 text-center transition"
-        :class="
-          dragOverUpload
-            ? 'border-violet-400 bg-violet-500/15'
-            : 'border-white/15 bg-slate-900/50 hover:border-violet-400/40'
-        "
-        @dragover.prevent="dragOverUpload = true"
-        @dragleave.prevent="dragOverUpload = false"
-        @drop.prevent="handleUploadDrop"
-      >
-        <input
-          ref="archiveInputRef"
-          type="file"
-          accept=".zip,.tar.gz,.tgz,.tar.xz,.tar"
-          class="hidden"
-          @change="handleArchiveInputChange"
-        />
-        <FolderArchive class="mb-2 h-7 w-7 text-violet-400" />
-        <p class="mb-1 text-xs font-medium text-slate-200">
-          워게임 문제 압축 파일을 여기에 놓거나 선택하세요
-        </p>
-        <p class="mb-3 text-[11px] text-slate-400">
-          지원 형식: .zip, .tar.gz, .tgz, .tar.xz, .tar (docker-compose / Dockerfile / 단일 바이너리·웹 자동 감지)
-        </p>
-        <button
-          type="button"
-          :disabled="preparing"
-          class="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-4 py-2 font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
-          @click="archiveInputRef?.click()"
-        >
-          <RefreshCw v-if="preparing" class="h-3.5 w-3.5 animate-spin" />
-          <Upload v-else class="h-3.5 w-3.5" />
-          {{ preparing ? '압축 해제 및 구조 분석 중...' : '압축 파일 선택' }}
-        </button>
-      </div>
-
-      <div v-else class="space-y-2.5">
-        <div class="flex flex-wrap items-center gap-1.5">
-          <button
-            v-for="root in mountRoots"
-            :key="root.id"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition"
-            :class="
-              mountRootId === root.id
-                ? 'bg-violet-500/25 text-violet-200 ring-1 ring-violet-400/40'
-                : 'bg-slate-900 text-slate-300 hover:bg-white/10'
-            "
-            @click="loadMountDir(root.id, '')"
-          >
-            <HardDrive class="h-3.5 w-3.5" />
-            {{ root.name }}
-          </button>
-          <span v-if="mountRoots.length === 0" class="text-[11px] text-slate-500">
-            연결된 마운트 폴더가 없습니다.
-          </span>
         </div>
 
         <div
-          v-if="mountRootId"
-          class="flex items-center gap-1 overflow-x-auto rounded-lg border border-white/5 bg-slate-900/70 px-2.5 py-1.5 text-[11px]"
+          v-if="prepareTab === 'upload'"
+          class="flex flex-col items-center justify-center rounded-[5px] border border-dashed px-4 py-8 text-center transition"
+          :class="
+            dragOverUpload
+              ? 'border-[#0572ec] bg-[#e6f0ff]/60'
+              : 'border-[#94a3b8] bg-[#f8fafc] hover:border-[#0572ec]'
+          "
+          @dragover.prevent="dragOverUpload = true"
+          @dragleave.prevent="dragOverUpload = false"
+          @drop.prevent="handleUploadDrop"
         >
+          <input
+            ref="archiveInputRef"
+            type="file"
+            accept=".zip,.tar.gz,.tgz,.tar.xz,.tar"
+            class="hidden"
+            @change="handleArchiveInputChange"
+          />
+          <FolderArchive class="mb-2 h-7 w-7 text-[#0572ec]" />
+          <p class="mb-1 text-[12px] font-semibold text-[#1e293b]">
+            워게임 문제 압축 파일을 여기에 놓거나 선택하세요
+          </p>
+          <p class="mb-3.5 text-[11px] text-[#64748b]">
+            지원 형식: .zip, .tar.gz, .tgz, .tar.xz, .tar (docker-compose / Dockerfile / 단일 바이너리·웹 자동 감지)
+          </p>
           <button
             type="button"
-            class="rounded px-1.5 py-0.5 font-semibold text-violet-300 hover:bg-white/5"
-            @click="loadMountDir(mountRootId, '')"
-          >
-            {{ mountRoots.find((r) => r.id === mountRootId)?.name ?? mountRootId }}
-          </button>
-          <template v-for="crumb in mountBreadcrumbs" :key="crumb.relPath">
-            <ChevronRight class="h-3 w-3 shrink-0 text-slate-500" />
-            <button
-              type="button"
-              class="rounded px-1.5 py-0.5 text-slate-200 hover:bg-white/5"
-              @click="loadMountDir(mountRootId, crumb.relPath)"
-            >
-              {{ crumb.name }}
-            </button>
-          </template>
-        </div>
-
-        <div class="max-h-40 overflow-y-auto rounded-xl border border-white/10 bg-slate-900/60">
-          <div v-if="mountLoading" class="py-6 text-center text-slate-400">폴더 내용을 불러오는 중...</div>
-          <div
-            v-else-if="mountSelectableEntries.length === 0"
-            class="py-6 text-center text-[11px] text-slate-500"
-          >
-            하위 폴더나 압축 파일이 없습니다. 아래 버튼으로 현재 폴더 자체를 바로 준비할 수 있습니다.
-          </div>
-          <div
-            v-for="entry in mountSelectableEntries"
-            :key="entry.relPath"
-            class="flex cursor-pointer select-none items-center justify-between gap-2 border-b border-white/5 px-3 py-1.5 last:border-b-0"
-            :class="
-              mountSelectedRelPath === entry.relPath
-                ? 'bg-violet-500/25 text-white'
-                : 'hover:bg-white/5'
-            "
-            @click="handleMountEntryClick(entry)"
-            @dblclick="handleMountEntryDblClick(entry)"
-          >
-            <div class="flex min-w-0 items-center gap-2">
-              <Folder v-if="entry.isDir" class="h-4 w-4 shrink-0 text-amber-400" />
-              <FolderArchive v-else class="h-4 w-4 shrink-0 text-orange-400" />
-              <span class="truncate font-medium">{{ entry.name }}</span>
-            </div>
-            <div class="flex shrink-0 items-center gap-2 text-[11px] text-slate-400">
-              <span v-if="!entry.isDir" class="tabular-nums">{{ formatBytes(entry.size) }}</span>
-              <button
-                v-if="entry.isDir"
-                type="button"
-                class="inline-flex items-center gap-0.5 rounded bg-white/10 px-2 py-0.5 text-[10px] font-medium text-slate-200 hover:bg-white/20"
-                @click.stop="loadMountDir(mountRootId, entry.relPath)"
-              >
-                이동
-                <ChevronRight class="h-3 w-3" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-          <div class="min-w-0 text-[11px] text-slate-300">
-            <span class="text-slate-400">선택 대상: </span>
-            <span class="font-mono text-violet-200">
-              {{ activeMountTarget ? activeMountTarget.displayPath : '-' }}
-            </span>
-            <button
-              v-if="mountSelectedRelPath !== null"
-              type="button"
-              class="ml-2 text-sky-300 underline hover:text-sky-200"
-              @click="mountSelectedRelPath = null"
-            >
-              현재 폴더로 전환
-            </button>
-          </div>
-
-          <button
-            type="button"
-            :disabled="!activeMountTarget || preparing"
-            class="inline-flex items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
-            @click="handlePrepareSelectedMount"
+            :disabled="preparing"
+            class="dsm-btn dsm-btn-primary"
+            @click="archiveInputRef?.click()"
           >
             <RefreshCw v-if="preparing" class="h-3.5 w-3.5 animate-spin" />
-            <Cpu v-else class="h-3.5 w-3.5" />
-            {{ preparing ? '분석 중...' : '이 경로로 워게임 준비' }}
+            <Upload v-else class="h-3.5 w-3.5" />
+            {{ preparing ? '압축 해제 및 구조 분석 중...' : '압축 파일 선택' }}
           </button>
         </div>
-      </div>
-    </section>
 
-    <section class="flex-1 space-y-3">
-      <div class="flex items-center justify-between px-1">
-        <div class="flex items-center gap-2">
-          <h3 class="text-sm font-semibold text-white">워게임 인스턴스 ({{ instances.length }})</h3>
-          <span v-if="defaultBindIp" class="font-mono text-[11px] text-slate-400">
-            바인딩 IP {{ defaultBindIp }}
-          </span>
-        </div>
-        <button
-          type="button"
-          class="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white"
-          title="목록 새로고침"
-          @click="refreshWargames()"
-        >
-          <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingList }" />
-        </button>
-      </div>
+        <div v-else class="space-y-2.5">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button
+              v-for="root in mountRoots"
+              :key="root.id"
+              type="button"
+              class="dsm-btn"
+              :class="
+                mountRootId === root.id
+                  ? '!border-[#0572ec] !bg-[#e6f0ff] !text-[#0058cc] font-semibold'
+                  : ''
+              "
+              @click="loadMountDir(root.id, '')"
+            >
+              <HardDrive class="h-3.5 w-3.5" />
+              {{ root.name }}
+            </button>
+            <span v-if="mountRoots.length === 0" class="text-[11px] text-[#64748b]">
+              연결된 공유 폴더가 없습니다.
+            </span>
+          </div>
 
-      <div
-        v-if="instances.length === 0 && !loadingList"
-        class="flex flex-col items-center justify-center rounded-2xl border border-white/10 bg-slate-950/40 py-12 text-center text-slate-400"
-      >
-        <Cpu class="mb-2.5 h-8 w-8 text-slate-600" />
-        <p class="font-medium text-slate-300">준비된 워게임 인스턴스가 없습니다</p>
-        <p class="mt-1 text-[11px] text-slate-500">
-          상단에서 압축 파일을 업로드하거나 File Station에서 폴더/압축 파일을 선택해 워게임 실행을 누르세요.
-        </p>
-      </div>
-
-      <article
-        v-for="inst in instances"
-        :key="inst.id"
-        class="space-y-3 rounded-2xl border border-white/10 bg-slate-950/75 p-4 shadow-lg"
-      >
-        <div class="flex flex-wrap items-start justify-between gap-2">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <h4 class="truncate text-sm font-semibold text-white">{{ inst.name }}</h4>
-              <span
-                class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
-                :class="statusBadgeClass(inst.status)"
+          <div
+            v-if="mountRootId"
+            class="flex items-center gap-1 overflow-x-auto rounded-[4px] border border-[#dce2ea] bg-[#f8fafc] px-2.5 py-1.5 text-[11px]"
+          >
+            <button
+              type="button"
+              class="rounded-[3px] px-1.5 py-0.5 font-semibold text-[#0058cc] hover:bg-[#e6f0ff]"
+              @click="loadMountDir(mountRootId, '')"
+            >
+              {{ mountRoots.find((r) => r.id === mountRootId)?.name ?? mountRootId }}
+            </button>
+            <template v-for="crumb in mountBreadcrumbs" :key="crumb.relPath">
+              <ChevronRight class="h-3 w-3 shrink-0 text-[#94a3b8]" />
+              <button
+                type="button"
+                class="rounded-[3px] px-1.5 py-0.5 text-[#334155] hover:bg-[#e2e8f0]"
+                @click="loadMountDir(mountRootId, crumb.relPath)"
               >
-                <RefreshCw v-if="inst.status === 'building'" class="h-3 w-3 animate-spin" />
-                {{ statusLabel(inst.status) }}
-              </span>
-              <span class="rounded-md bg-white/10 px-2 py-0.5 text-[10px] font-medium text-slate-300">
-                {{ modeLabel(inst.mode) }}
-              </span>
-              <span
-                v-if="inst.relaxSecurity"
-                class="rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300"
-              >
-                권한 제한 완화
-              </span>
+                {{ crumb.name }}
+              </button>
+            </template>
+          </div>
+
+          <div class="max-h-52 overflow-y-auto rounded-[4px] border border-[#dce2ea] bg-white">
+            <div v-if="mountLoading" class="py-6 text-center text-[#64748b]">
+              폴더 내용을 불러오는 중...
             </div>
-            <div class="mt-1 flex flex-wrap items-center gap-3 font-mono text-[11px] text-slate-400">
-              <span>ID: {{ inst.id }}</span>
-              <span v-if="inst.composeFile">Compose: {{ inst.composeFile }}</span>
-              <span v-if="inst.entrypointFile">엔트리: {{ inst.entrypointFile }}</span>
+            <div
+              v-else-if="mountSelectableEntries.length === 0"
+              class="py-6 text-center text-[11px] text-[#64748b]"
+            >
+              하위 폴더나 압축 파일이 없습니다. 아래 버튼으로 현재 폴더 자체를 바로 준비할 수 있습니다.
+            </div>
+            <div
+              v-for="entry in mountSelectableEntries"
+              :key="entry.relPath"
+              class="flex cursor-pointer select-none items-center justify-between gap-2 border-b border-[#eef2f6] px-3 py-1.5 last:border-b-0"
+              :class="
+                mountSelectedRelPath === entry.relPath
+                  ? 'bg-[#e6f0ff] text-[#0058cc]'
+                  : 'text-[#1e293b] hover:bg-[#f8fafc]'
+              "
+              @click="handleMountEntryClick(entry)"
+              @dblclick="handleMountEntryDblClick(entry)"
+            >
+              <div class="flex min-w-0 items-center gap-2">
+                <Folder
+                  v-if="entry.isDir"
+                  class="h-4 w-4 shrink-0 fill-[#fbbf24] text-[#d97706]"
+                />
+                <FolderArchive v-else class="h-4 w-4 shrink-0 text-[#0572ec]" />
+                <span class="truncate font-medium">{{ entry.name }}</span>
+              </div>
+              <div class="flex shrink-0 items-center gap-2 text-[11px] text-[#64748b]">
+                <span v-if="!entry.isDir" class="tabular-nums">{{ formatBytes(entry.size) }}</span>
+                <button
+                  v-if="entry.isDir"
+                  type="button"
+                  class="dsm-btn !h-6 !px-2 !text-[11px]"
+                  @click.stop="loadMountDir(mountRootId, entry.relPath)"
+                >
+                  이동
+                  <ChevronRight class="h-3 w-3" />
+                </button>
+              </div>
             </div>
           </div>
 
-          <div v-if="inst.status === 'running'" class="flex flex-wrap items-center gap-2">
-            <span
-              class="rounded-lg border border-emerald-400/25 bg-emerald-500/10 px-2.5 py-1 font-mono text-xs font-semibold tabular-nums text-emerald-200"
-            >
-              TTL {{ formatDuration(remainingSeconds(inst.expiresAt)) }}
-            </span>
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <div class="min-w-0 text-[11px] text-[#475569]">
+              <span>선택 대상: </span>
+              <span class="font-mono font-medium text-[#0058cc]">
+                {{ activeMountTarget ? activeMountTarget.displayPath : '-' }}
+              </span>
+              <button
+                v-if="mountSelectedRelPath !== null"
+                type="button"
+                class="ml-2 text-[#0572ec] underline hover:text-[#005ec4]"
+                @click="mountSelectedRelPath = null"
+              >
+                현재 폴더로 전환
+              </button>
+            </div>
+
             <button
               type="button"
-              :disabled="isBusy(inst.id)"
-              class="inline-flex items-center gap-1 rounded-lg border border-sky-400/30 bg-sky-500/15 px-2.5 py-1 font-semibold text-sky-200 hover:bg-sky-500/25 disabled:opacity-50"
-              @click="handleExtend(inst.id)"
+              :disabled="!activeMountTarget || preparing"
+              class="dsm-btn dsm-btn-primary"
+              @click="handlePrepareSelectedMount"
             >
-              <Plus class="h-3.5 w-3.5" />
-              +1시간 연장
+              <RefreshCw v-if="preparing" class="h-3.5 w-3.5 animate-spin" />
+              <Plus v-else class="h-3.5 w-3.5" />
+              {{ preparing ? '분석 중...' : '이 경로로 워게임 준비' }}
             </button>
           </div>
         </div>
+      </section>
 
-        <div
-          v-if="inst.warnings.length > 0"
-          class="space-y-1 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200"
-        >
-          <div v-for="(warn, wIdx) in inst.warnings" :key="wIdx" class="flex items-start gap-1.5">
-            <AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
-            <span>{{ warn }}</span>
-          </div>
-        </div>
-
-        <div
-          v-if="inst.lastError !== ''"
-          class="rounded-xl border border-rose-500/35 bg-rose-500/15 px-3 py-2 font-mono text-[11px] whitespace-pre-wrap break-all text-rose-200"
-        >
-          {{ inst.lastError }}
-        </div>
-
-        <div
-          v-if="isEditableStatus(inst.status)"
-          class="space-y-3 rounded-xl border border-white/10 bg-slate-900/80 p-3"
-        >
-          <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <label class="mb-1 block text-[11px] text-slate-400">인스턴스 이름</label>
-              <input
-                :value="readDraft(inst).name"
-                type="text"
-                class="w-full rounded-lg border border-white/10 bg-slate-950 px-2.5 py-1.5 text-xs text-white focus:border-violet-400 focus:outline-none"
-                @input="handleDraftNameInput(inst, $event)"
-              />
-            </div>
-
-            <div v-if="inst.mode === 'template'">
-              <label class="mb-1 block text-[11px] text-slate-400">실행 템플릿</label>
-              <select
-                :value="readDraft(inst).templateKind || 'pwn-socat'"
-                class="w-full rounded-lg border border-white/10 bg-slate-950 px-2.5 py-1.5 text-xs text-white focus:border-violet-400 focus:outline-none"
-                @change="handleDraftTemplateChange(inst, $event)"
-              >
-                <option v-for="opt in TEMPLATE_OPTIONS" :key="opt.value" :value="opt.value">
-                  {{ opt.label }}
-                </option>
-              </select>
-            </div>
-
-            <div v-if="inst.mode !== 'compose'">
-              <label class="mb-1 block text-[11px] text-slate-400">컨테이너 포트</label>
-              <input
-                :value="readDraft(inst).containerPort"
-                type="number"
-                min="1"
-                max="65535"
-                class="w-full rounded-lg border border-white/10 bg-slate-950 px-2.5 py-1.5 font-mono text-xs text-white focus:border-violet-400 focus:outline-none"
-                @input="handleDraftPortInput(inst, $event)"
-              />
-            </div>
-
-            <div v-if="inst.mode !== 'compose'">
-              <label class="mb-1 block text-[11px] text-slate-400">접속 방식</label>
-              <select
-                :value="readDraft(inst).connKind"
-                class="w-full rounded-lg border border-white/10 bg-slate-950 px-2.5 py-1.5 text-xs text-white focus:border-violet-400 focus:outline-none"
-                @change="handleDraftConnChange(inst, $event)"
-              >
-                <option value="nc">Netcat (nc)</option>
-                <option value="http">웹 브라우저 (HTTP)</option>
-              </select>
-            </div>
+      <section v-else class="space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <h3 class="text-[13px] font-semibold text-[#1e293b]">
+              컨테이너 현황 ({{ instances.length }})
+            </h3>
           </div>
 
-          <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
-            <label class="inline-flex items-center gap-2 text-xs text-slate-300">
-              <input
-                :checked="readDraft(inst).relaxSecurity"
-                type="checkbox"
-                class="rounded border-white/20 bg-slate-950"
-                @change="handleDraftRelaxChange(inst, $event)"
-              />
-              권한 제한 완화 (SETUID/root 필요 시)
-            </label>
-
-            <div class="flex flex-wrap items-center gap-1.5">
-              <button
-                v-if="inst.status === 'stopped' || inst.status === 'failed'"
-                type="button"
-                class="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2.5 py-1.5 text-slate-200 hover:bg-white/10"
-                @click="openLogs(inst)"
-              >
-                <FileText class="h-3.5 w-3.5 text-sky-300" />
-                로그 보기
-              </button>
-
-              <a
-                :href="api.wargameSourceUrl(inst.id)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2.5 py-1.5 text-slate-200 hover:bg-white/10"
-              >
-                <Download class="h-3.5 w-3.5 text-sky-300" />
-                원본 ZIP
-              </a>
-
-              <template v-if="confirmDeleteId === inst.id">
-                <button
-                  type="button"
-                  :disabled="isBusy(inst.id)"
-                  class="rounded-lg bg-rose-600 px-2.5 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
-                  @click="handleDelete(inst.id)"
-                >
-                  삭제 확인
-                </button>
-                <button
-                  type="button"
-                  class="rounded-lg bg-white/5 px-2.5 py-1.5 text-slate-300 hover:bg-white/10"
-                  @click="confirmDeleteId = null"
-                >
-                  취소
-                </button>
-              </template>
-              <button
-                v-else
-                type="button"
-                :disabled="isBusy(inst.id)"
-                class="inline-flex items-center gap-1 rounded-lg bg-rose-500/15 px-2.5 py-1.5 text-rose-300 hover:bg-rose-500/25 disabled:opacity-50"
-                @click="confirmDeleteId = inst.id"
-              >
-                <Trash2 class="h-3.5 w-3.5" />
-                삭제
-              </button>
-
-              <button
-                type="button"
-                :disabled="isBusy(inst.id) || !dockerAvailable"
-                class="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-1.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-                @click="handleStart(inst)"
-              >
-                <Play class="h-3.5 w-3.5" />
-                빌드 &amp; 실행
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div
-          v-else-if="inst.status === 'building'"
-          class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3.5 py-2.5"
-        >
-          <div class="flex items-center gap-2 text-amber-200">
-            <RefreshCw class="h-4 w-4 animate-spin text-amber-300" />
-            <span>Docker 이미지 빌드 및 컨테이너 기동 중입니다...</span>
-          </div>
           <div class="flex items-center gap-1.5">
             <button
               type="button"
-              class="inline-flex items-center gap-1 rounded-lg bg-white/10 px-2.5 py-1.5 font-medium text-white hover:bg-white/15"
-              @click="openLogs(inst)"
+              class="dsm-btn dsm-btn-primary"
+              @click="selectNavSection('register')"
             >
-              <FileText class="h-3.5 w-3.5 text-amber-200" />
-              로그 보기
+              <Plus class="h-3.5 w-3.5" />
+              새 워게임 등록
             </button>
-            <a
-              :href="api.wargameSourceUrl(inst.id)"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1 rounded-lg bg-white/10 px-2.5 py-1.5 text-slate-200 hover:bg-white/15"
+            <button
+              type="button"
+              class="dsm-btn"
+              title="목록 새로고침"
+              @click="refreshWargames()"
             >
-              <Download class="h-3.5 w-3.5 text-sky-300" />
-              원본 ZIP
-            </a>
+              <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingList }" />
+              새로고침
+            </button>
           </div>
         </div>
 
-        <div v-else-if="inst.status === 'running'" class="space-y-3">
-          <div class="space-y-2">
-            <div
-              v-for="(port, pIdx) in inst.ports"
-              :key="`${port.service}-${port.hostPort}-${pIdx}`"
-              class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-400/30 bg-emerald-950/40 px-3.5 py-2.5"
-            >
-              <div class="flex min-w-0 flex-wrap items-center gap-2.5">
+        <div
+          v-if="instances.length === 0 && !loadingList"
+          class="flex flex-col items-center justify-center rounded-[6px] border border-[#dce2ea] bg-white px-4 py-12 text-center shadow-2xs"
+        >
+          <Box class="mb-2.5 h-8 w-8 text-[#94a3b8]" />
+          <p class="font-semibold text-[#1e293b]">등록된 워게임 컨테이너가 없습니다</p>
+          <p class="mt-1 mb-3.5 text-[11px] text-[#64748b]">
+            좌측의 '새 워게임 등록' 메뉴나 File Station에서 문제 압축 파일·폴더를 선택해 실행하세요.
+          </p>
+          <button
+            type="button"
+            class="dsm-btn dsm-btn-primary"
+            @click="selectNavSection('register')"
+          >
+            <Plus class="h-3.5 w-3.5" />
+            새 워게임 등록
+          </button>
+        </div>
+
+        <article
+          v-for="inst in instances"
+          :key="inst.id"
+          class="space-y-3 rounded-[6px] border border-[#dce2ea] bg-white p-4 shadow-2xs"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="h-2.5 w-2.5 shrink-0 rounded-full" :class="statusDotClass(inst.status)" />
+                <h4 class="truncate text-[13px] font-semibold text-[#1e293b]">{{ inst.name }}</h4>
                 <span
-                  class="inline-flex items-center gap-1 rounded-md bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-300"
+                  class="inline-flex items-center gap-1 text-[11px] font-semibold"
+                  :class="statusTextClass(inst.status)"
                 >
-                  <Terminal v-if="port.connKind === 'nc'" class="h-3 w-3" />
-                  <ExternalLink v-else class="h-3 w-3" />
-                  {{ port.connKind }}
+                  <RefreshCw v-if="inst.status === 'building'" class="h-3 w-3 animate-spin" />
+                  {{ statusLabel(inst.status) }}
                 </span>
-
-                <code
-                  v-if="port.connKind === 'nc'"
-                  class="font-mono text-sm font-semibold text-white select-all"
+                <span
+                  class="rounded-[3px] border border-[#dce2ea] bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-medium text-[#475569]"
                 >
-                  {{ buildNcCommand(inst, port) }}
-                </code>
-                <a
-                  v-else
-                  :href="buildHttpUrl(inst, port)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1.5 font-mono text-sm font-semibold text-sky-300 underline decoration-sky-400/50 hover:text-sky-200"
+                  {{ modeLabel(inst.mode) }}
+                </span>
+                <span
+                  v-if="inst.relaxSecurity"
+                  class="rounded-[3px] border border-[#fde68a] bg-[#fffbeb] px-2 py-0.5 text-[11px] font-medium text-[#92400e]"
                 >
-                  {{ buildHttpUrl(inst, port) }}
-                  <ExternalLink class="h-3.5 w-3.5 shrink-0" />
-                </a>
-
-                <span class="font-mono text-[11px] text-slate-400">
-                  ({{ port.service ? `${port.service} · ` : '' }}{{ port.containerPort }}/{{ port.protocol || 'tcp' }})
+                  권한 제한 완화
                 </span>
               </div>
 
+              <div class="mt-1 flex flex-wrap items-center gap-3 font-mono text-[11px] text-[#64748b]">
+                <span>ID: {{ inst.id }}</span>
+                <span v-if="inst.composeFile">Compose: {{ inst.composeFile }}</span>
+                <span v-if="inst.entrypointFile">엔트리: {{ inst.entrypointFile }}</span>
+              </div>
+            </div>
+
+            <div v-if="inst.status === 'running'" class="flex flex-wrap items-center gap-1.5">
+              <span
+                class="rounded-[4px] border border-[#cbd5e1] bg-[#f1f5f9] px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums text-[#334155]"
+              >
+                TTL {{ formatDuration(remainingSeconds(inst.expiresAt)) }}
+              </span>
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded-lg bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-100 hover:bg-white/20"
-                @click="
-                  copyConnectionText(
-                    `${inst.id}-${port.hostPort}`,
-                    port.connKind === 'nc' ? buildNcCommand(inst, port) : buildHttpUrl(inst, port),
-                  )
-                "
+                :disabled="isBusy(inst.id)"
+                class="dsm-btn"
+                @click="handleExtend(inst.id)"
               >
-                <Check
-                  v-if="copiedKey === `${inst.id}-${port.hostPort}`"
-                  class="h-3.5 w-3.5 text-emerald-400"
-                />
-                <Copy v-else class="h-3.5 w-3.5" />
-                {{ copiedKey === `${inst.id}-${port.hostPort}` ? '복사됨' : '복사' }}
+                <Plus class="h-3.5 w-3.5 text-[#0572ec]" />
+                +1시간 연장
               </button>
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2.5">
-            <div class="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                :disabled="isBusy(inst.id)"
-                class="inline-flex items-center gap-1.5 rounded-lg bg-sky-600/90 px-3 py-1.5 font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
-                @click="handleReset(inst.id)"
-              >
-                <RotateCcw class="h-3.5 w-3.5" />
-                리셋 (1초 초기화)
-              </button>
+          <div
+            v-if="inst.warnings.length > 0"
+            class="space-y-1 rounded-[4px] border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[11px] text-[#92400e]"
+          >
+            <div v-for="(warn, wIdx) in inst.warnings" :key="wIdx" class="flex items-start gap-1.5">
+              <AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#d97706]" />
+              <span>{{ warn }}</span>
+            </div>
+          </div>
 
-              <button
-                type="button"
-                :disabled="isBusy(inst.id)"
-                class="inline-flex items-center gap-1.5 rounded-lg bg-amber-500/20 px-3 py-1.5 font-semibold text-amber-200 hover:bg-amber-500/30 disabled:opacity-50"
-                @click="handleStop(inst.id)"
-              >
-                <Square class="h-3.5 w-3.5" />
-                일시 중지 (이미지 유지)
-              </button>
+          <div
+            v-if="inst.lastError !== ''"
+            class="rounded-[4px] border border-[#fecdd3] bg-[#fff1f2] px-3 py-2 font-mono text-[11px] whitespace-pre-wrap break-all text-[#be123c]"
+          >
+            {{ inst.lastError }}
+          </div>
 
-              <template v-if="confirmDeleteId === inst.id">
-                <button
-                  type="button"
-                  :disabled="isBusy(inst.id)"
-                  class="rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
-                  @click="handleDelete(inst.id)"
+          <div
+            v-if="isEditableStatus(inst.status)"
+            class="space-y-3 rounded-[5px] border border-[#e2e8f0] bg-[#f8fafc] p-3"
+          >
+            <div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label class="mb-1 block text-[11px] font-medium text-[#475569]">인스턴스 이름</label>
+                <input
+                  :value="readDraft(inst).name"
+                  type="text"
+                  class="dsm-input w-full"
+                  @input="handleDraftNameInput(inst, $event)"
+                />
+              </div>
+
+              <div v-if="inst.mode === 'template'">
+                <label class="mb-1 block text-[11px] font-medium text-[#475569]">실행 템플릿</label>
+                <select
+                  :value="readDraft(inst).templateKind || 'pwn-socat'"
+                  class="dsm-select w-full"
+                  @change="handleDraftTemplateChange(inst, $event)"
                 >
-                  삭제 확인
-                </button>
-                <button
-                  type="button"
-                  class="rounded-lg bg-white/5 px-2.5 py-1.5 text-slate-300 hover:bg-white/10"
-                  @click="confirmDeleteId = null"
+                  <option v-for="opt in TEMPLATE_OPTIONS" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div v-if="inst.mode !== 'compose'">
+                <label class="mb-1 block text-[11px] font-medium text-[#475569]">컨테이너 포트</label>
+                <input
+                  :value="readDraft(inst).containerPort"
+                  type="number"
+                  min="1"
+                  max="65535"
+                  class="dsm-input w-full font-mono"
+                  @input="handleDraftPortInput(inst, $event)"
+                />
+              </div>
+
+              <div v-if="inst.mode !== 'compose'">
+                <label class="mb-1 block text-[11px] font-medium text-[#475569]">접속 방식</label>
+                <select
+                  :value="readDraft(inst).connKind"
+                  class="dsm-select w-full"
+                  @change="handleDraftConnChange(inst, $event)"
                 >
-                  취소
-                </button>
-              </template>
-              <button
-                v-else
-                type="button"
-                :disabled="isBusy(inst.id)"
-                class="inline-flex items-center gap-1.5 rounded-lg bg-rose-600/20 px-3 py-1.5 font-semibold text-rose-300 hover:bg-rose-600/30 disabled:opacity-50"
-                @click="confirmDeleteId = inst.id"
-              >
-                <Trash2 class="h-3.5 w-3.5" />
-                종료 및 이미지 삭제
-              </button>
+                  <option value="nc">Netcat (nc)</option>
+                  <option value="http">웹 브라우저 (HTTP)</option>
+                </select>
+              </div>
             </div>
 
-            <div class="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2.5 py-1.5 text-slate-200 hover:bg-white/10"
-                @click="openLogs(inst)"
-              >
-                <FileText class="h-3.5 w-3.5 text-sky-300" />
-                로그 보기
-              </button>
+            <div class="flex flex-wrap items-center justify-between gap-3 pt-0.5">
+              <label class="inline-flex items-center gap-2 text-[12px] text-[#334155]">
+                <input
+                  :checked="readDraft(inst).relaxSecurity"
+                  type="checkbox"
+                  class="accent-[#0572ec]"
+                  @change="handleDraftRelaxChange(inst, $event)"
+                />
+                권한 제한 완화 (SETUID/root 필요 시)
+              </label>
 
+              <div class="flex flex-wrap items-center gap-1.5">
+                <button
+                  v-if="inst.status === 'stopped' || inst.status === 'failed'"
+                  type="button"
+                  class="dsm-btn"
+                  @click="openLogs(inst)"
+                >
+                  <FileText class="h-3.5 w-3.5 text-[#0572ec]" />
+                  로그
+                </button>
+
+                <a
+                  :href="api.wargameSourceUrl(inst.id)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="dsm-btn"
+                >
+                  <Download class="h-3.5 w-3.5 text-[#475569]" />
+                  원본 ZIP
+                </a>
+
+                <template v-if="confirmDeleteId === inst.id">
+                  <button
+                    type="button"
+                    :disabled="isBusy(inst.id)"
+                    class="dsm-btn dsm-btn-danger-solid"
+                    @click="handleDelete(inst.id)"
+                  >
+                    삭제 확인
+                  </button>
+                  <button
+                    type="button"
+                    class="dsm-btn"
+                    @click="confirmDeleteId = null"
+                  >
+                    취소
+                  </button>
+                </template>
+                <button
+                  v-else
+                  type="button"
+                  :disabled="isBusy(inst.id)"
+                  class="dsm-btn dsm-btn-danger"
+                  @click="confirmDeleteId = inst.id"
+                >
+                  <Trash2 class="h-3.5 w-3.5" />
+                  삭제
+                </button>
+
+                <button
+                  type="button"
+                  :disabled="isBusy(inst.id) || !dockerAvailable"
+                  class="dsm-btn dsm-btn-primary"
+                  @click="handleStart(inst)"
+                >
+                  <Play class="h-3.5 w-3.5" />
+                  빌드 및 실행
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-else-if="inst.status === 'building'"
+            class="flex flex-wrap items-center justify-between gap-2 rounded-[4px] border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-[#92400e]"
+          >
+            <div class="flex items-center gap-2">
+              <RefreshCw class="h-4 w-4 animate-spin text-[#d97706]" />
+              <span>Docker 이미지 빌드 및 컨테이너 기동 중입니다...</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button type="button" class="dsm-btn" @click="openLogs(inst)">
+                <FileText class="h-3.5 w-3.5 text-[#0572ec]" />
+                로그
+              </button>
               <a
                 :href="api.wargameSourceUrl(inst.id)"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="inline-flex items-center gap-1 rounded-lg bg-white/5 px-2.5 py-1.5 text-slate-200 hover:bg-white/10"
+                class="dsm-btn"
               >
-                <Download class="h-3.5 w-3.5 text-sky-300" />
+                <Download class="h-3.5 w-3.5 text-[#475569]" />
                 원본 ZIP
               </a>
             </div>
           </div>
-        </div>
-      </article>
-    </section>
+
+          <div v-else-if="inst.status === 'running'" class="space-y-3">
+            <div class="space-y-2">
+              <div
+                v-for="(port, pIdx) in inst.ports"
+                :key="`${port.service}-${port.hostPort}-${pIdx}`"
+                class="flex flex-wrap items-center justify-between gap-2 rounded-[5px] border border-[#b8d4fe] bg-[#f0f7ff] px-3 py-2"
+              >
+                <div class="flex min-w-0 flex-wrap items-center gap-2.5">
+                  <span
+                    class="inline-flex items-center gap-1 rounded-[3px] bg-[#dbeafe] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#0052cc]"
+                  >
+                    <Terminal v-if="port.connKind === 'nc'" class="h-3 w-3" />
+                    <ExternalLink v-else class="h-3 w-3" />
+                    {{ port.connKind }}
+                  </span>
+
+                  <code
+                    v-if="port.connKind === 'nc'"
+                    class="font-mono text-[13px] font-semibold text-[#0f172a] select-all"
+                  >
+                    {{ buildNcCommand(inst, port) }}
+                  </code>
+                  <a
+                    v-else
+                    :href="buildHttpUrl(inst, port)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex items-center gap-1 font-mono text-[13px] font-semibold text-[#0052cc] underline hover:text-[#0572ec]"
+                  >
+                    {{ buildHttpUrl(inst, port) }}
+                    <ExternalLink class="h-3.5 w-3.5 shrink-0" />
+                  </a>
+
+                  <span class="font-mono text-[11px] text-[#64748b]">
+                    ({{ port.service ? `${port.service} · ` : '' }}{{ port.containerPort }}/{{ port.protocol || 'tcp' }})
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  class="dsm-btn"
+                  @click="
+                    copyConnectionText(
+                      `${inst.id}-${port.hostPort}`,
+                      port.connKind === 'nc' ? buildNcCommand(inst, port) : buildHttpUrl(inst, port),
+                    )
+                  "
+                >
+                  <Check
+                    v-if="copiedKey === `${inst.id}-${port.hostPort}`"
+                    class="h-3.5 w-3.5 text-[#059669]"
+                  />
+                  <Copy v-else class="h-3.5 w-3.5 text-[#475569]" />
+                  {{ copiedKey === `${inst.id}-${port.hostPort}` ? '복사됨' : '복사' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 border-t border-[#e2e8f0] pt-2.5">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  :disabled="isBusy(inst.id)"
+                  class="dsm-btn"
+                  @click="handleReset(inst.id)"
+                >
+                  <RotateCcw class="h-3.5 w-3.5 text-[#0572ec]" />
+                  리셋 (초기화)
+                </button>
+
+                <button
+                  type="button"
+                  :disabled="isBusy(inst.id)"
+                  class="dsm-btn"
+                  @click="handleStop(inst.id)"
+                >
+                  <Square class="h-3.5 w-3.5 text-[#475569]" />
+                  일시 중지
+                </button>
+
+                <template v-if="confirmDeleteId === inst.id">
+                  <button
+                    type="button"
+                    :disabled="isBusy(inst.id)"
+                    class="dsm-btn dsm-btn-danger-solid"
+                    @click="handleDelete(inst.id)"
+                  >
+                    삭제 확인
+                  </button>
+                  <button
+                    type="button"
+                    class="dsm-btn"
+                    @click="confirmDeleteId = null"
+                  >
+                    취소
+                  </button>
+                </template>
+                <button
+                  v-else
+                  type="button"
+                  :disabled="isBusy(inst.id)"
+                  class="dsm-btn dsm-btn-danger"
+                  @click="confirmDeleteId = inst.id"
+                >
+                  <Trash2 class="h-3.5 w-3.5" />
+                  종료 및 이미지 삭제
+                </button>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-1.5">
+                <button type="button" class="dsm-btn" @click="openLogs(inst)">
+                  <FileText class="h-3.5 w-3.5 text-[#0572ec]" />
+                  로그
+                </button>
+
+                <a
+                  :href="api.wargameSourceUrl(inst.id)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="dsm-btn"
+                >
+                  <Download class="h-3.5 w-3.5 text-[#475569]" />
+                  원본 ZIP
+                </a>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </div>
 
     <div
       v-if="logsDrawer.kind === 'open'"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       @click.self="closeLogs"
     >
-      <div class="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-2xl border border-white/15 bg-slate-950 p-4 text-slate-100 shadow-2xl">
-        <div class="mb-3 flex items-center justify-between border-b border-white/10 pb-2.5">
+      <div class="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-[6px] border border-[#cbd5e1] bg-white text-[#1e293b] shadow-2xl">
+        <div class="flex items-center justify-between border-b border-[#dce2ea] bg-[#eef1f5] px-4 py-2.5 text-[#1e293b]">
           <div class="flex items-center gap-2">
-            <Terminal class="h-4 w-4 text-violet-400" />
-            <h4 class="text-sm font-semibold text-white">로그 · {{ logsDrawer.instanceName }}</h4>
-            <span
-              class="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-              :class="statusBadgeClass(logsDrawer.status)"
-            >
-              {{ statusLabel(logsDrawer.status) }}
+            <Terminal class="h-4 w-4 text-[#0572ec]" />
+            <h4 class="text-[13px] font-semibold text-[#1e293b]">
+              로그 · {{ logsDrawer.instanceName }}
+            </h4>
+            <span class="inline-flex items-center gap-1.5 rounded-[3px] border border-[#dce2ea] bg-white px-2 py-0.5 text-[11px] font-semibold">
+              <span class="h-2 w-2 rounded-full" :class="statusDotClass(logsDrawer.status)" />
+              <span :class="statusTextClass(logsDrawer.status)">{{ statusLabel(logsDrawer.status) }}</span>
             </span>
           </div>
           <button
             type="button"
-            class="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
+            class="rounded-[4px] p-1 text-[#475569] hover:bg-[#dce2ea] hover:text-[#1e293b]"
             @click="closeLogs"
           >
             <X class="h-4 w-4" />
           </button>
         </div>
 
-        <p v-if="logsDrawer.error" class="mb-2 text-xs text-rose-300">{{ logsDrawer.error }}</p>
-
-        <div class="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-2">
-          <div class="flex min-h-56 flex-col rounded-xl border border-white/10 bg-black/70">
-            <div class="border-b border-white/10 px-3 py-1.5 text-[11px] font-semibold text-slate-300">
-              빌드 로그 (buildLog)
-            </div>
-            <pre
-              class="flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-slate-200"
-            >{{ logsDrawer.buildLog || (logsDrawer.loading ? '불러오는 중...' : '(출력 없음)') }}</pre>
+        <div class="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden bg-[#f4f6f9] p-3">
+          <div
+            v-if="logsDrawer.error"
+            class="rounded-[4px] border border-[#fecdd3] bg-[#fff1f2] px-3 py-1.5 text-[11px] text-[#be123c]"
+          >
+            {{ logsDrawer.error }}
           </div>
 
-          <div class="flex min-h-56 flex-col rounded-xl border border-white/10 bg-black/70">
-            <div class="border-b border-white/10 px-3 py-1.5 text-[11px] font-semibold text-slate-300">
-              컨테이너 출력 (containerLog)
+          <div class="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-2">
+            <div class="flex min-h-60 flex-col overflow-hidden rounded-[4px] border border-[#cbd5e1] bg-[#141923] font-mono text-[#e2e8f0]">
+              <div class="border-b border-[#263040] bg-[#1c2331] px-3 py-1.5 font-sans text-[11px] font-semibold text-[#cbd5e1]">
+                빌드 로그 (buildLog)
+              </div>
+              <pre
+                class="flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[#e2e8f0]"
+              >{{ logsDrawer.buildLog || (logsDrawer.loading ? '불러오는 중...' : '(출력 없음)') }}</pre>
             </div>
-            <pre
-              class="flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-emerald-200"
-            >{{ logsDrawer.containerLog || (logsDrawer.loading ? '불러오는 중...' : '(출력 없음)') }}</pre>
+
+            <div class="flex min-h-60 flex-col overflow-hidden rounded-[4px] border border-[#cbd5e1] bg-[#141923] font-mono text-[#e2e8f0]">
+              <div class="border-b border-[#263040] bg-[#1c2331] px-3 py-1.5 font-sans text-[11px] font-semibold text-[#cbd5e1]">
+                컨테이너 출력 (containerLog)
+              </div>
+              <pre
+                class="flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[#e2e8f0]"
+              >{{ logsDrawer.containerLog || (logsDrawer.loading ? '불러오는 중...' : '(출력 없음)') }}</pre>
+            </div>
           </div>
         </div>
       </div>

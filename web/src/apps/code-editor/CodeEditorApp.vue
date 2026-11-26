@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { Save, CheckCircle2, AlertCircle } from 'lucide-vue-next'
+import { AlertCircle, CheckCircle2, Save } from 'lucide-vue-next'
 import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { basicSetup } from 'codemirror'
@@ -116,7 +116,10 @@ onMounted(async () => {
           }),
           EditorView.theme({
             '&': { height: '100%', fontSize: '13px' },
-            '.cm-scroller': { overflow: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' },
+            '.cm-scroller': {
+              overflow: 'auto',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+            },
           }),
         ],
       })
@@ -141,18 +144,24 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col bg-[#282c34] text-xs text-slate-200">
-    <!-- Editor Toolbar -->
-    <div class="flex items-center justify-between border-b border-white/10 bg-slate-950/90 px-3 py-2">
+  <div class="flex h-full w-full flex-col bg-white text-[12px] text-[#334155]">
+    <div class="flex shrink-0 items-center justify-between gap-2 border-b border-[#dce2ea] bg-[#f8fafc] px-3 py-1.5 text-[#334155]">
       <div class="flex min-w-0 items-center gap-2">
-        <span class="truncate font-mono text-xs text-slate-300">{{ rootId }}:/{{ relPath }}</span>
-        <span class="text-[11px] text-slate-500">({{ formatBytes(byteSize) }})</span>
-        <span v-if="dirty" class="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
+        <span class="truncate font-mono text-[12px] font-medium text-[#1e293b]">
+          {{ rootId }}:/{{ relPath }}
+        </span>
+        <span class="shrink-0 tabular-nums text-[11px] text-[#64748b]">
+          ({{ formatBytes(byteSize) }})
+        </span>
+        <span
+          v-if="dirty"
+          class="shrink-0 rounded-[3px] border border-[#fcd34d] bg-[#fffbeb] px-1.5 py-0.5 text-[11px] font-semibold text-[#b45309]"
+        >
           수정됨
         </span>
         <span
           v-else-if="savedNotice"
-          class="inline-flex items-center gap-1 text-[11px] text-emerald-400"
+          class="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-[#059669]"
         >
           <CheckCircle2 class="h-3.5 w-3.5" />
           저장 완료
@@ -163,7 +172,7 @@ onUnmounted(() => {
         v-if="!readOnly"
         type="button"
         :disabled="saving || loading"
-        class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+        class="dsm-btn dsm-btn-primary shrink-0"
         @click="saveDocument"
       >
         <Save class="h-3.5 w-3.5" />
@@ -171,7 +180,7 @@ onUnmounted(() => {
       </button>
       <span
         v-else
-        class="rounded-lg border border-amber-400/30 bg-amber-500/15 px-2.5 py-1 text-[11px] font-semibold text-amber-300"
+        class="shrink-0 rounded-[4px] border border-[#fcd34d] bg-[#fffbeb] px-2 py-1 text-[11px] font-semibold text-[#b45309]"
       >
         읽기 전용
       </span>
@@ -179,16 +188,16 @@ onUnmounted(() => {
 
     <div
       v-if="errorMessage"
-      class="flex items-center gap-2 border-b border-rose-500/30 bg-rose-500/15 px-3 py-2 text-rose-200"
+      class="flex shrink-0 items-center gap-2 border-b border-[#fecdd3] bg-[#fff1f2] px-3 py-1.5 text-[#be123c]"
     >
       <AlertCircle class="h-4 w-4 shrink-0" />
       <span>{{ errorMessage }}</span>
     </div>
 
-    <div v-if="loading" class="flex flex-1 items-center justify-center text-slate-400">
+    <div v-if="loading" class="flex flex-1 items-center justify-center bg-white text-[#64748b]">
       파일을 불러오는 중...
     </div>
 
-    <div v-show="!loading" ref="editorHostRef" class="min-h-0 flex-1 overflow-hidden" />
+    <div v-show="!loading" ref="editorHostRef" class="min-h-0 flex-1 overflow-hidden bg-[#282c34]" />
   </div>
 </template>

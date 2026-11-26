@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { Download, Film, FolderArchive, Lock, AlertCircle } from 'lucide-vue-next'
+import { Download, Lock, AlertCircle } from 'lucide-vue-next'
 import { api } from '../api/client'
 import type { PublicShareState } from '../types/api'
 import { formatBytes, formatDateTime } from '../utils/format'
+import DsmAppIcon from './desktop/DsmAppIcon.vue'
+import DsmWallpaper from './desktop/DsmWallpaper.vue'
 
 const props = defineProps<{
   readonly token: string
@@ -56,29 +58,41 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex min-h-full w-full items-center justify-center overflow-y-auto bg-slate-950 p-6 text-slate-100">
-    <div v-if="view.kind === 'loading'" class="text-sm text-slate-400">공유 항목을 확인하는 중...</div>
+  <div class="relative flex min-h-full w-full items-center justify-center overflow-y-auto bg-[#0b3b6e] p-6">
+    <DsmWallpaper theme="ocean" />
+
+    <div
+      v-if="view.kind === 'loading'"
+      class="relative z-10 rounded-[8px] border border-slate-200/80 bg-white px-6 py-4 text-[13px] text-slate-600 shadow-2xl"
+    >
+      공유 항목을 확인하는 중...
+    </div>
 
     <div
       v-else-if="view.kind === 'error'"
-      class="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-rose-500/30 bg-slate-900 p-8 text-center"
+      class="relative z-10 flex w-full max-w-md flex-col items-center gap-2.5 rounded-[8px] border border-slate-200/80 bg-white p-8 text-center text-slate-800 shadow-2xl"
     >
-      <AlertCircle class="h-10 w-10 text-rose-400" />
-      <h2 class="text-base font-semibold">공유 링크에 접근할 수 없습니다</h2>
-      <p class="text-xs text-slate-400">{{ view.message }}</p>
+      <AlertCircle class="h-9 w-9 text-[#d92d4b]" />
+      <h2 class="text-[15px] font-semibold text-[#1e293b]">공유 링크에 접근할 수 없습니다</h2>
+      <p class="text-[12px] text-[#64748b]">{{ view.message }}</p>
     </div>
 
     <div
       v-else-if="view.share.kind === 'locked'"
-      class="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-xl"
+      class="relative z-10 w-full max-w-sm rounded-[8px] border border-slate-200/80 bg-white p-6 text-slate-800 shadow-2xl"
     >
-      <div class="mb-4 flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-amber-300">
-          <Lock class="h-5 w-5" />
+      <div class="mb-5 flex items-center gap-3">
+        <div class="relative shrink-0">
+          <DsmAppIcon app-id="file-station" size="md" />
+          <span
+            class="absolute -right-1 -bottom-1 flex h-4.5 w-4.5 items-center justify-center rounded-full border border-white bg-[#1e293b] text-white"
+          >
+            <Lock class="h-2.5 w-2.5" />
+          </span>
         </div>
-        <div>
-          <h2 class="text-sm font-semibold">비밀번호로 보호된 공유 링크</h2>
-          <p class="text-xs text-slate-400">만료: {{ formatDateTime(view.share.expiresAt) }}</p>
+        <div class="min-w-0">
+          <h2 class="text-[14px] font-semibold text-[#1e293b]">비밀번호로 보호된 공유 링크</h2>
+          <p class="mt-0.5 text-[11.5px] text-[#64748b]">만료: {{ formatDateTime(view.share.expiresAt) }}</p>
         </div>
       </div>
 
@@ -87,13 +101,13 @@ onMounted(() => {
           v-model="passwordInput"
           type="password"
           placeholder="공유 비밀번호 입력"
-          class="w-full rounded-xl border border-white/10 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-sky-400 focus:outline-none"
+          class="dsm-input !h-9 w-full !text-[13px]"
         />
-        <p v-if="unlockError" class="text-xs text-rose-300">{{ unlockError }}</p>
+        <p v-if="unlockError" class="text-[12px] font-medium text-[#c81e3a]">{{ unlockError }}</p>
         <button
           type="submit"
           :disabled="unlocking"
-          class="w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+          class="dsm-btn dsm-btn-primary !h-9 w-full !text-[13px]"
         >
           {{ unlocking ? '확인 중...' : '잠금 해제' }}
         </button>
@@ -102,17 +116,14 @@ onMounted(() => {
 
     <div
       v-else
-      class="w-full max-w-4xl rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl"
+      class="relative z-10 w-full max-w-4xl rounded-[8px] border border-slate-200/80 bg-white p-6 text-slate-800 shadow-2xl"
     >
-      <div class="mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
-        <div class="flex items-center gap-3">
-          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500/20 text-sky-300">
-            <Film v-if="view.share.fileKind === 'video'" class="h-6 w-6" />
-            <FolderArchive v-else class="h-6 w-6" />
-          </div>
-          <div>
-            <h1 class="text-base font-semibold text-white">{{ view.share.name }}</h1>
-            <p class="text-xs text-slate-400">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-[#dce2ea] pb-4">
+        <div class="flex min-w-0 items-center gap-3">
+          <DsmAppIcon :app-id="view.share.fileKind === 'video' ? 'video-player' : 'file-station'" size="md" />
+          <div class="min-w-0">
+            <h1 class="truncate text-[15px] font-semibold text-[#1e293b]">{{ view.share.name }}</h1>
+            <p class="mt-0.5 text-[12px] text-[#64748b]">
               {{ view.share.isDir ? '폴더 (ZIP 압축 다운로드)' : formatBytes(view.share.size) }}
               · 만료 {{ formatDateTime(view.share.expiresAt) }}
             </p>
@@ -122,19 +133,19 @@ onMounted(() => {
         <a
           v-if="view.share.allowDownload"
           :href="api.publicShareDownloadUrl(view.share.token)"
-          class="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-500"
+          class="dsm-btn dsm-btn-primary no-underline"
         >
-          <Download class="h-4 w-4" />
-          {{ view.share.isDir ? 'ZIP 다운로드' : '파일 다운로드' }}
+          <Download class="h-3.5 w-3.5" />
+          <span>다운로드</span>
         </a>
       </div>
 
-      <div v-if="view.share.fileKind === 'video'" class="overflow-hidden rounded-xl bg-black">
+      <div v-if="view.share.fileKind === 'video'" class="overflow-hidden rounded-[4px] border border-[#dce2ea] bg-[#000000]">
         <video
           controls
           playsinline
           preload="metadata"
-          class="aspect-video max-h-[70vh] w-full bg-black"
+          class="aspect-video max-h-[70vh] w-full bg-[#000000]"
           :src="api.publicShareStreamUrl(view.share.token)"
           crossorigin="use-credentials"
         >
@@ -149,9 +160,16 @@ onMounted(() => {
           />
         </video>
       </div>
-      <div v-else class="py-10 text-center text-sm text-slate-400">
+      <div
+        v-else
+        class="rounded-[4px] border border-[#e2e8f0] bg-[#f8fafc] py-10 text-center text-[12.5px] text-[#64748b]"
+      >
         상단의 다운로드 버튼을 눌러 파일을 저장하세요.
       </div>
+    </div>
+
+    <div class="pointer-events-none absolute bottom-4 left-6 z-10 select-none text-[11.5px] text-white/75">
+      File Station 공유 · Personal NAS
     </div>
   </div>
 </template>

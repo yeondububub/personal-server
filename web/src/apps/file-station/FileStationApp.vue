@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import {
-  HardDrive,
   Folder,
   Film,
   FileCode2,
   FileText,
-  Image as ImageIcon,
+  Image,
   Music,
   FolderArchive,
   Upload,
@@ -21,6 +20,7 @@ import {
   Settings2,
   Lock,
   Cpu,
+  X,
 } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import { useAuthStore } from '../../stores/auth'
@@ -58,7 +58,6 @@ const uploadProgress = ref<{
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
-// Inline dialog states (avoids browser prompt/confirm blocking)
 type DialogState =
   | { readonly kind: 'none' }
   | { readonly kind: 'mkdir'; value: string }
@@ -110,9 +109,10 @@ async function loadDirectory(rootId: string, relPath: string): Promise<void> {
 async function refreshRoots(preferredRoot?: string, preferredPath?: string): Promise<void> {
   try {
     roots.value = await api.fetchRoots()
-    const stillExists = roots.value.some((r) => r.id === (preferredRoot ?? currentRootId.value))
-    if (stillExists && (preferredRoot ?? currentRootId.value)) {
-      await loadDirectory(preferredRoot ?? currentRootId.value, preferredPath ?? currentRelPath.value)
+    const targetRoot = preferredRoot ?? currentRootId.value
+    const stillExists = roots.value.some((r) => r.id === targetRoot)
+    if (stillExists && targetRoot) {
+      await loadDirectory(targetRoot, preferredPath ?? currentRelPath.value)
       return
     }
     const firstRoot = roots.value[0]
@@ -154,7 +154,7 @@ function handleOpenEntry(entry: FileEntry): void {
   }
   if (entry.kind === 'video') {
     desktopStore.openWindow({
-      title: `Video Player - ${entry.name}`,
+      title: `Media Player - ${entry.name}`,
       payload: {
         kind: 'video-player',
         rootId: currentRootId.value,
@@ -166,7 +166,7 @@ function handleOpenEntry(entry: FileEntry): void {
   }
   if (entry.kind === 'code') {
     desktopStore.openWindow({
-      title: `Code Editor - ${entry.name}`,
+      title: `텍스트 편집기 - ${entry.name}`,
       payload: {
         kind: 'code-editor',
         rootId: currentRootId.value,
@@ -183,7 +183,7 @@ function openSelectedInEditor(): void {
   const entry = selectedEntry.value
   if (!entry || entry.isDir) return
   desktopStore.openWindow({
-    title: `Code Editor - ${entry.name}`,
+    title: `텍스트 편집기 - ${entry.name}`,
     payload: {
       kind: 'code-editor',
       rootId: currentRootId.value,
@@ -208,6 +208,18 @@ function launchSelectedInWargame(): void {
       },
     },
   })
+}
+
+function openRenameDialog(): void {
+  const entry = selectedEntry.value
+  if (!entry || currentReadOnly.value) return
+  dialog.value = { kind: 'rename', entry, value: entry.name }
+}
+
+function openDeleteDialog(): void {
+  const entry = selectedEntry.value
+  if (!entry || currentReadOnly.value) return
+  dialog.value = { kind: 'delete', entry }
 }
 
 async function uploadFiles(fileList: FileList | readonly File[]): Promise<void> {
@@ -284,7 +296,7 @@ async function submitDialog(): Promise<void> {
       dialog.value = { kind: 'none' }
       await loadDirectory(currentRootId.value, currentRelPath.value)
       desktopStore.openWindow({
-        title: `Code Editor - ${d.value.trim()}`,
+        title: `텍스트 편집기 - ${d.value.trim()}`,
         payload: {
           kind: 'code-editor',
           rootId: currentRootId.value,
@@ -321,6 +333,7 @@ async function submitDialog(): Promise<void> {
 }
 
 function openShareForSelection(): void {
+  if (!currentRootId.value) return
   const entry = selectedEntry.value
   if (entry) {
     shareTarget.value = {
@@ -339,6 +352,7 @@ function openShareForSelection(): void {
 }
 
 function downloadSelectionOrFolder(): void {
+  if (!currentRootId.value) return
   const targetRel = selectedEntry.value ? selectedEntry.value.relPath : currentRelPath.value
   window.open(api.downloadUrl({ rootId: currentRootId.value, relPath: targetRel }), '_blank')
 }
@@ -352,7 +366,7 @@ function iconForKind(kind: FileKind) {
     case 'code':
       return FileCode2
     case 'image':
-      return ImageIcon
+      return Image
     case 'audio':
       return Music
     case 'archive':
@@ -369,19 +383,19 @@ function iconForKind(kind: FileKind) {
 function iconColorForKind(kind: FileKind): string {
   switch (kind) {
     case 'dir':
-      return 'text-amber-400'
+      return 'text-[#f59e0b] fill-[#fde68a]'
     case 'video':
-      return 'text-rose-400'
+      return 'text-[#e11d48]'
     case 'code':
-      return 'text-emerald-400'
+      return 'text-[#0572ec]'
     case 'image':
-      return 'text-purple-400'
+      return 'text-[#0284c7]'
     case 'audio':
-      return 'text-cyan-400'
+      return 'text-[#2563eb]'
     case 'archive':
-      return 'text-orange-400'
+      return 'text-[#64748b]'
     case 'file':
-      return 'text-slate-400'
+      return 'text-[#64748b]'
     default: {
       const _exhaustive: never = kind
       return _exhaustive
@@ -392,332 +406,361 @@ function iconColorForKind(kind: FileKind): string {
 
 <template>
   <div
-    class="flex h-full w-full text-xs text-slate-200"
+    class="relative flex h-full w-full flex-col bg-white text-[12px] text-[#1e293b]"
     @dragover.prevent="dragOver = true"
     @dragleave.prevent="dragOver = false"
     @drop.prevent="handleDrop"
   >
-    <!-- Left Sidebar: Mounted Roots -->
-    <aside class="flex w-52 shrink-0 flex-col border-r border-white/10 bg-slate-950/50 p-2.5">
-      <div class="mb-2 px-2 text-[11px] font-semibold tracking-wider text-slate-400">마운트 폴더</div>
-      <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto">
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#dce2ea] bg-[#f8fafc] px-2.5 py-1.5">
+      <div class="flex flex-wrap items-center gap-1.5">
+        <input
+          ref="fileInputRef"
+          type="file"
+          multiple
+          class="hidden"
+          @change="handleFileInputChange"
+        />
+
         <button
-          v-for="root in roots"
-          :key="root.id"
+          v-if="!currentReadOnly"
           type="button"
-          class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition"
-          :class="
-            currentRootId === root.id
-              ? 'bg-sky-500/20 font-semibold text-sky-300'
-              : 'text-slate-300 hover:bg-white/5'
+          class="dsm-btn dsm-btn-primary"
+          :disabled="!currentRootId"
+          @click="fileInputRef?.click()"
+        >
+          <Upload class="h-3.5 w-3.5" />
+          <span>업로드</span>
+        </button>
+
+        <button
+          v-if="!currentReadOnly"
+          type="button"
+          class="dsm-btn"
+          :disabled="!currentRootId"
+          @click="dialog = { kind: 'mkdir', value: '' }"
+        >
+          <FolderPlus class="h-3.5 w-3.5 text-[#f59e0b]" />
+          <span>새 폴더 생성</span>
+        </button>
+
+        <button
+          v-if="!currentReadOnly"
+          type="button"
+          class="dsm-btn"
+          :disabled="!currentRootId"
+          @click="dialog = { kind: 'new-file', value: '' }"
+        >
+          <FilePlus2 class="h-3.5 w-3.5 text-[#0572ec]" />
+          <span>새 파일</span>
+        </button>
+
+        <span
+          v-if="currentReadOnly"
+          class="inline-flex h-7 items-center gap-1 rounded-[4px] border border-amber-300 bg-amber-50 px-2 text-[11px] font-medium text-amber-800"
+        >
+          <Lock class="h-3 w-3" />
+          <span>읽기 전용</span>
+        </span>
+
+        <button
+          type="button"
+          class="dsm-btn"
+          :disabled="!currentRootId"
+          @click="downloadSelectionOrFolder"
+        >
+          <Download class="h-3.5 w-3.5 text-[#475569]" />
+          <span>다운로드</span>
+        </button>
+
+        <button
+          type="button"
+          class="dsm-btn"
+          :disabled="!selectedEntry || selectedEntry.isDir"
+          @click="openSelectedInEditor"
+        >
+          <FileCode2 class="h-3.5 w-3.5 text-[#0572ec]" />
+          <span>편집</span>
+        </button>
+
+        <button
+          type="button"
+          class="dsm-btn"
+          :disabled="!currentRootId"
+          @click="openShareForSelection"
+        >
+          <Share2 class="h-3.5 w-3.5 text-[#475569]" />
+          <span>공유 링크</span>
+        </button>
+
+        <button
+          v-if="
+            authStore.accessTier === 'private' &&
+            selectedEntry &&
+            (selectedEntry.isDir || selectedEntry.kind === 'archive')
           "
-          @click="loadDirectory(root.id, '')"
-        >
-          <span class="flex min-w-0 items-center gap-2">
-            <HardDrive class="h-4 w-4 shrink-0" />
-            <span class="truncate">{{ root.name }}</span>
-          </span>
-          <span
-            v-if="root.readOnly"
-            class="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-semibold text-amber-300"
-          >
-            RO
-          </span>
-        </button>
-      </nav>
-
-      <div v-if="authStore.accessTier === 'private'" class="mt-2 border-t border-white/10 pt-2">
-        <button
           type="button"
-          class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-400/25 bg-sky-500/10 px-2.5 py-2 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-500/20"
-          @click="openMountManager"
+          class="dsm-btn !border-[#b8d4fe] !text-[#0572ec]"
+          @click="launchSelectedInWargame"
         >
-          <Settings2 class="h-3.5 w-3.5" />
-          + 폴더 마운트 관리
+          <Cpu class="h-3.5 w-3.5 text-[#0572ec]" />
+          <span>워게임 실행</span>
         </button>
       </div>
-    </aside>
 
-    <!-- Main Content -->
-    <div class="relative flex min-w-0 flex-1 flex-col">
-      <!-- Toolbar -->
-      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-slate-900/80 px-3 py-2">
-        <div class="flex flex-wrap items-center gap-1.5">
-          <input
-            ref="fileInputRef"
-            type="file"
-            multiple
-            class="hidden"
-            @change="handleFileInputChange"
-          />
-          <button
-            v-if="!currentReadOnly"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 font-semibold text-white hover:bg-sky-500"
-            @click="fileInputRef?.click()"
-          >
-            <Upload class="h-3.5 w-3.5" />
-            업로드
-          </button>
+      <div class="flex items-center gap-1.5">
+        <button
+          v-if="!currentReadOnly"
+          type="button"
+          class="dsm-btn"
+          :disabled="!selectedEntry"
+          title="이름 변경"
+          @click="openRenameDialog"
+        >
+          <Pencil class="h-3.5 w-3.5 text-[#475569]" />
+          <span>이름 변경</span>
+        </button>
 
-          <button
-            v-if="!currentReadOnly"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5 hover:bg-white/10"
-            @click="dialog = { kind: 'mkdir', value: '' }"
-          >
-            <FolderPlus class="h-3.5 w-3.5 text-amber-300" />
-            새 폴더
-          </button>
+        <button
+          v-if="!currentReadOnly"
+          type="button"
+          class="dsm-btn dsm-btn-danger"
+          :disabled="!selectedEntry"
+          title="삭제"
+          @click="openDeleteDialog"
+        >
+          <Trash2 class="h-3.5 w-3.5" />
+          <span>삭제</span>
+        </button>
 
-          <button
-            v-if="!currentReadOnly"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5 hover:bg-white/10"
-            @click="dialog = { kind: 'new-file', value: '' }"
-          >
-            <FilePlus2 class="h-3.5 w-3.5 text-emerald-300" />
-            새 파일
-          </button>
-
-          <span
-            v-if="currentReadOnly"
-            class="inline-flex items-center gap-1 rounded-lg border border-amber-400/30 bg-amber-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-amber-300"
-          >
-            <Lock class="h-3 w-3" />
-            읽기 전용 폴더
-          </span>
-
-          <button
-            v-if="selectedEntry && !selectedEntry.isDir"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5 hover:bg-white/10"
-            @click="openSelectedInEditor"
-          >
-            <FileCode2 class="h-3.5 w-3.5 text-emerald-300" />
-            편집
-          </button>
-
-          <button
-            v-if="
-              authStore.accessTier === 'private' &&
-              selectedEntry &&
-              (selectedEntry.isDir || selectedEntry.kind === 'archive')
-            "
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/30 bg-violet-500/15 px-2.5 py-1.5 font-semibold text-violet-200 hover:bg-violet-500/25"
-            @click="launchSelectedInWargame"
-          >
-            <Cpu class="h-3.5 w-3.5 text-violet-300" />
-            워게임 실행
-          </button>
-
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5 hover:bg-white/10"
-            @click="downloadSelectionOrFolder"
-          >
-            <Download class="h-3.5 w-3.5 text-sky-300" />
-            {{ selectedEntry ? (selectedEntry.isDir ? 'ZIP 다운로드' : '다운로드') : '현재 폴더 ZIP' }}
-          </button>
-
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5 hover:bg-white/10"
-            @click="openShareForSelection"
-          >
-            <Share2 class="h-3.5 w-3.5 text-indigo-300" />
-            공유 링크
-          </button>
-        </div>
-
-        <div class="flex items-center gap-1">
-          <button
-            v-if="selectedEntry && !currentReadOnly"
-            type="button"
-            class="rounded-lg p-1.5 text-slate-300 hover:bg-white/10"
-            title="이름 변경"
-            @click="dialog = { kind: 'rename', entry: selectedEntry, value: selectedEntry.name }"
-          >
-            <Pencil class="h-3.5 w-3.5" />
-          </button>
-          <button
-            v-if="selectedEntry && !currentReadOnly"
-            type="button"
-            class="rounded-lg p-1.5 text-rose-300 hover:bg-rose-500/20"
-            title="삭제"
-            @click="dialog = { kind: 'delete', entry: selectedEntry }"
-          >
-            <Trash2 class="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            class="rounded-lg p-1.5 text-slate-300 hover:bg-white/10"
-            title="새로고침"
-            @click="loadDirectory(currentRootId, currentRelPath)"
-          >
-            <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />
-          </button>
-        </div>
-      </div>
-
-      <!-- Breadcrumb Bar -->
-      <div class="flex items-center gap-1 overflow-x-auto border-b border-white/5 bg-slate-950/40 px-3 py-1.5 text-xs">
         <button
           type="button"
-          class="rounded px-1.5 py-0.5 font-medium text-sky-300 hover:bg-white/5"
+          class="dsm-btn"
+          :disabled="!currentRootId"
+          title="새로고침"
+          @click="loadDirectory(currentRootId, currentRelPath)"
+        >
+          <RefreshCw class="h-3.5 w-3.5 text-[#475569]" :class="{ 'animate-spin': loading }" />
+        </button>
+      </div>
+    </div>
+
+    <div class="border-b border-[#e2e8f0] bg-white px-2.5 py-1.5">
+      <div class="flex h-7 items-center gap-0.5 overflow-x-auto rounded-[4px] border border-[#cbd5e1] bg-[#f8fafc] px-2 text-[12px] text-[#334155]">
+        <Folder class="mr-1 h-3.5 w-3.5 shrink-0 fill-[#fde68a] text-[#f59e0b]" />
+        <button
+          v-if="currentRootId"
+          type="button"
+          class="cursor-pointer rounded-[3px] px-1.5 py-0.5 font-medium text-[#1e293b] hover:bg-[#e2e8f0]/70"
           @click="loadDirectory(currentRootId, '')"
         >
           {{ roots.find((r) => r.id === currentRootId)?.name ?? currentRootId }}
         </button>
+        <span v-else class="text-[#94a3b8]">공유 폴더 없음</span>
+
         <template v-for="crumb in breadcrumbs" :key="crumb.relPath">
-          <ChevronRight class="h-3.5 w-3.5 shrink-0 text-slate-500" />
+          <ChevronRight class="h-3.5 w-3.5 shrink-0 text-[#94a3b8]" />
           <button
             type="button"
-            class="rounded px-1.5 py-0.5 text-slate-200 hover:bg-white/5"
+            class="cursor-pointer rounded-[3px] px-1.5 py-0.5 text-[#334155] hover:bg-[#e2e8f0]/70"
             @click="loadDirectory(currentRootId, crumb.relPath)"
           >
             {{ crumb.name }}
           </button>
         </template>
       </div>
+    </div>
 
-      <!-- Upload Progress Banner -->
-      <div
-        v-if="uploadProgress.active"
-        class="flex items-center gap-3 border-b border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs"
-      >
-        <span class="truncate font-medium text-sky-200">업로드 중: {{ uploadProgress.fileName }}</span>
-        <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800">
-          <div class="h-full bg-sky-400 transition-all" :style="{ width: `${uploadProgress.percent}%` }" />
-        </div>
-        <span class="tabular-nums text-sky-300">{{ uploadProgress.percent }}%</span>
-      </div>
+    <div class="flex min-h-0 flex-1 overflow-hidden">
+      <aside class="flex w-52 shrink-0 flex-col border-r border-[#dce2ea] bg-[#f5f7fa] py-2">
+        <div class="mb-1 px-3 text-[11px] font-semibold text-[#64748b]">공유 폴더</div>
 
-      <!-- Error Banner -->
-      <div
-        v-if="errorMessage"
-        class="border-b border-rose-500/30 bg-rose-500/15 px-3 py-2 text-xs text-rose-200"
-      >
-        {{ errorMessage }}
-      </div>
-
-      <!-- File Table -->
-      <div class="min-h-0 flex-1 overflow-y-auto" @click.self="selectedRelPath = null">
-        <table class="w-full border-collapse text-left">
-          <thead class="sticky top-0 z-10 bg-slate-950/90 text-[11px] text-slate-400 backdrop-blur">
-            <tr class="border-b border-white/10">
-              <th class="px-3 py-2 font-medium">이름</th>
-              <th class="w-28 px-3 py-2 font-medium">크기</th>
-              <th class="hidden w-40 px-3 py-2 font-medium sm:table-cell">수정한 날짜</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="!loading && entries.length === 0">
-              <td colspan="3" class="px-4 py-14 text-center text-slate-500">
-                폴더가 비어 있습니다. 파일을 드래그해서 놓거나 상단의 업로드 버튼을 누르세요.
-              </td>
-            </tr>
-            <tr
-              v-for="entry in entries"
-              :key="entry.relPath"
-              class="cursor-pointer select-none border-b border-white/5 transition"
-              :class="
-                selectedRelPath === entry.relPath
-                  ? 'bg-sky-500/20 text-white'
-                  : 'hover:bg-white/5'
-              "
-              @click="selectedRelPath = entry.relPath"
-              @dblclick="handleOpenEntry(entry)"
+        <nav class="min-h-0 flex-1 overflow-y-auto">
+          <button
+            v-for="root in roots"
+            :key="root.id"
+            type="button"
+            class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-left text-[12px] transition-colors"
+            :class="
+              currentRootId === root.id
+                ? 'border-l-[3px] border-[#0572ec] bg-[#e6f0ff] font-semibold text-[#0058cc]'
+                : 'border-l-[3px] border-transparent text-[#334155] hover:bg-[#eaeff5]'
+            "
+            @click="loadDirectory(root.id, '')"
+          >
+            <span class="flex min-w-0 items-center gap-2">
+              <Folder class="h-4 w-4 shrink-0 fill-[#fde68a] text-[#f59e0b]" />
+              <span class="truncate">{{ root.name }}</span>
+            </span>
+            <span
+              v-if="root.readOnly"
+              class="shrink-0 rounded-[3px] border border-amber-300 bg-amber-50 px-1 text-[10px] font-medium text-amber-700"
             >
-              <td class="px-3 py-2">
-                <div class="flex items-center gap-2.5">
-                  <component
-                    :is="iconForKind(entry.kind)"
-                    class="h-4 w-4 shrink-0"
-                    :class="iconColorForKind(entry.kind)"
-                  />
-                  <span class="truncate font-medium">{{ entry.name }}</span>
-                </div>
-              </td>
-              <td class="px-3 py-2 tabular-nums text-slate-400">
-                {{ entry.isDir ? '-' : formatBytes(entry.size) }}
-              </td>
-              <td class="hidden px-3 py-2 tabular-nums text-slate-400 sm:table-cell">
-                {{ formatDateTime(entry.modTime) }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+              RO
+            </span>
+          </button>
+        </nav>
 
-      <!-- Footer Status Bar -->
-      <div class="flex items-center justify-between border-t border-white/10 bg-slate-950/60 px-3 py-1.5 text-[11px] text-slate-400">
-        <span>총 {{ entries.length }}개 항목</span>
-        <span v-if="selectedEntry">더블클릭하여 열기 · {{ selectedEntry.name }}</span>
-        <span v-else>파일을 창으로 드래그하여 청크 업로드 가능</span>
-      </div>
-
-      <!-- Drag Overlay -->
-      <div
-        v-if="dragOver"
-        class="pointer-events-none absolute inset-0 flex items-center justify-center border-2 border-dashed border-sky-400 bg-sky-950/60 backdrop-blur-xs"
-      >
-        <div class="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-sky-300 shadow-xl">
-          여기에 놓아 현재 폴더에 업로드
+        <div v-if="authStore.accessTier === 'private'" class="mt-2 border-t border-[#dce2ea] px-2.5 pt-2">
+          <button
+            type="button"
+            class="dsm-btn w-full"
+            @click="openMountManager"
+          >
+            <Settings2 class="h-3.5 w-3.5 text-[#475569]" />
+            <span>+ 공유 폴더 마운트 설정</span>
+          </button>
         </div>
-      </div>
+      </aside>
 
-      <!-- Inline Action Dialog -->
-      <div
-        v-if="dialog.kind !== 'none'"
-        class="absolute inset-0 z-30 flex items-center justify-center bg-black/55 p-4"
-        @click.self="dialog = { kind: 'none' }"
-      >
-        <form
-          class="w-full max-w-sm rounded-2xl border border-white/15 bg-slate-900 p-4 shadow-2xl"
-          @submit.prevent="submitDialog"
+      <div class="relative flex min-w-0 flex-1 flex-col bg-white">
+        <div
+          v-if="uploadProgress.active"
+          class="flex items-center gap-3 border-b border-[#b8d4fe] bg-[#e6f0ff] px-3 py-1.5 text-[12px]"
         >
-          <h4 class="mb-3 text-sm font-semibold text-white">
-            <template v-if="dialog.kind === 'mkdir'">새 폴더 만들기</template>
-            <template v-else-if="dialog.kind === 'new-file'">새 텍스트 파일 만들기</template>
-            <template v-else-if="dialog.kind === 'rename'">이름 변경</template>
-            <template v-else>항목 삭제 확인</template>
-          </h4>
-
-          <input
-            v-if="dialog.kind === 'mkdir' || dialog.kind === 'new-file' || dialog.kind === 'rename'"
-            v-model="dialog.value"
-            type="text"
-            autofocus
-            class="mb-3 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-white focus:border-sky-400 focus:outline-none"
-            :placeholder="dialog.kind === 'new-file' ? 'example.yaml' : '이름 입력'"
-          />
-          <p v-else class="mb-4 text-xs text-slate-300">
-            정말 <strong class="text-white">{{ dialog.entry.name }}</strong> 항목을 영구 삭제할까요?
-          </p>
-
-          <div class="flex justify-end gap-2">
-            <button
-              type="button"
-              class="rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:bg-white/5"
-              @click="dialog = { kind: 'none' }"
-            >
-              취소
-            </button>
-            <button
-              type="submit"
-              class="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
-              :class="dialog.kind === 'delete' ? 'bg-rose-600 hover:bg-rose-500' : 'bg-sky-600 hover:bg-sky-500'"
-            >
-              {{ dialog.kind === 'delete' ? '삭제' : '확인' }}
-            </button>
+          <span class="truncate font-medium text-[#004eb3]">업로드 중: {{ uploadProgress.fileName }}</span>
+          <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-[#cbd5e1]">
+            <div class="h-full bg-[#0572ec] transition-all" :style="{ width: `${uploadProgress.percent}%` }" />
           </div>
-        </form>
+          <span class="tabular-nums font-medium text-[#004eb3]">{{ uploadProgress.percent }}%</span>
+        </div>
+
+        <div
+          v-if="errorMessage"
+          class="border-b border-[#f5c2c7] bg-[#fff5f5] px-3 py-1.5 text-[12px] font-medium text-[#c81e3a]"
+        >
+          {{ errorMessage }}
+        </div>
+
+        <div class="min-h-0 flex-1 overflow-y-auto bg-white" @click.self="selectedRelPath = null">
+          <table class="w-full border-collapse bg-white text-left text-[12px]">
+            <thead class="sticky top-0 z-10 h-8 border-b border-[#dce2ea] bg-[#f8fafc] text-[#475569]">
+              <tr>
+                <th class="border-r border-[#e2e8f0] px-3 font-medium">이름</th>
+                <th class="w-28 border-r border-[#e2e8f0] px-3 font-medium">크기</th>
+                <th class="hidden w-44 px-3 font-medium sm:table-cell">수정한 날짜</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="!loading && entries.length === 0">
+                <td colspan="3" class="px-4 py-14 text-center text-[#64748b]">
+                  이 폴더는 비어 있습니다. 파일을 끌어다 놓거나 상단의 업로드 버튼을 클릭하세요.
+                </td>
+              </tr>
+              <tr
+                v-for="entry in entries"
+                :key="entry.relPath"
+                class="h-[34px] cursor-pointer select-none border-b border-[#f1f5f9] transition-colors"
+                :class="
+                  selectedRelPath === entry.relPath
+                    ? 'bg-[#e6f0ff] text-[#004eb3]'
+                    : 'text-[#1e293b] hover:bg-[#f5f8fc]'
+                "
+                @click="selectedRelPath = entry.relPath"
+                @dblclick="handleOpenEntry(entry)"
+              >
+                <td class="px-3">
+                  <div class="flex items-center gap-2">
+                    <component
+                      :is="iconForKind(entry.kind)"
+                      class="h-4 w-4 shrink-0"
+                      :class="iconColorForKind(entry.kind)"
+                    />
+                    <span class="truncate font-medium">{{ entry.name }}</span>
+                  </div>
+                </td>
+                <td
+                  class="px-3 tabular-nums"
+                  :class="selectedRelPath === entry.relPath ? 'text-[#004eb3]' : 'text-[#64748b]'"
+                >
+                  {{ entry.isDir ? '-' : formatBytes(entry.size) }}
+                </td>
+                <td
+                  class="hidden px-3 tabular-nums sm:table-cell"
+                  :class="selectedRelPath === entry.relPath ? 'text-[#004eb3]' : 'text-[#64748b]'"
+                >
+                  {{ formatDateTime(entry.modTime) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex h-7 shrink-0 items-center justify-between border-t border-[#dce2ea] bg-[#f8fafc] px-3 text-[11px] text-[#64748b]">
+          <span>총 {{ entries.length }}개 항목</span>
+          <span v-if="selectedEntry">선택됨: {{ selectedEntry.name }} (더블클릭하여 열기)</span>
+          <span v-else>파일을 창으로 드래그하여 업로드</span>
+        </div>
+
+        <div
+          v-if="dragOver"
+          class="pointer-events-none absolute inset-0 flex items-center justify-center border-2 border-dashed border-[#0572ec] bg-[#e6f0ff]/75"
+        >
+          <div class="rounded-[6px] border border-[#b8d4fe] bg-white px-4 py-2.5 text-[12.5px] font-semibold text-[#0058cc] shadow-md">
+            여기에 놓아 현재 폴더에 업로드
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Share Modal -->
+    <div
+      v-if="dialog.kind !== 'none'"
+      class="absolute inset-0 z-30 flex items-center justify-center bg-black/35 p-4"
+      @click.self="dialog = { kind: 'none' }"
+    >
+      <form
+        class="w-full max-w-sm overflow-hidden rounded-[6px] border border-[#cbd5e1] bg-white text-[#1e293b] shadow-xl"
+        @submit.prevent="submitDialog"
+      >
+        <div class="flex items-center justify-between border-b border-[#dce2ea] bg-[#f4f6f9] px-4 py-2.5 text-[13px] font-semibold">
+          <span>
+            <template v-if="dialog.kind === 'mkdir'">새 폴더 생성</template>
+            <template v-else-if="dialog.kind === 'new-file'">새 텍스트 파일 생성</template>
+            <template v-else-if="dialog.kind === 'rename'">이름 변경</template>
+            <template v-else>삭제 확인</template>
+          </span>
+          <button
+            type="button"
+            class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-[4px] text-[#64748b] hover:bg-black/6 hover:text-[#1e293b]"
+            @click="dialog = { kind: 'none' }"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div class="p-4">
+          <template v-if="dialog.kind === 'mkdir' || dialog.kind === 'new-file' || dialog.kind === 'rename'">
+            <label class="mb-1.5 block text-[12px] font-medium text-[#475569]">이름</label>
+            <input
+              v-model="dialog.value"
+              type="text"
+              autofocus
+              class="dsm-input w-full"
+              :placeholder="dialog.kind === 'new-file' ? 'example.yaml' : '이름 입력'"
+            />
+          </template>
+          <p v-else class="text-[12.5px] leading-relaxed text-[#334155]">
+            선택한 <strong class="font-semibold text-[#1e293b]">{{ dialog.entry.name }}</strong> 항목을 영구 삭제하시겠습니까?
+          </p>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 border-t border-[#dce2ea] bg-[#f8fafc] px-4 py-2.5">
+          <button
+            type="button"
+            class="dsm-btn"
+            @click="dialog = { kind: 'none' }"
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            :class="dialog.kind === 'delete' ? 'dsm-btn dsm-btn-danger-solid' : 'dsm-btn dsm-btn-primary'"
+          >
+            {{ dialog.kind === 'delete' ? '삭제' : '확인' }}
+          </button>
+        </div>
+      </form>
+    </div>
+
     <ShareModal
       v-if="shareTarget"
       :target-root-id="shareTarget.rootId"

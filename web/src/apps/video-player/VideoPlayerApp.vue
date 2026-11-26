@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RotateCcw, Subtitles, Download } from 'lucide-vue-next'
+import { Download, RotateCcw, Subtitles } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import type { MediaInfo } from '../../types/api'
 import { formatBytes, formatDuration } from '../../utils/format'
@@ -35,7 +35,7 @@ async function persistProgress(): Promise<void> {
       durationSec: Number.isFinite(el.duration) ? el.duration : 0,
     })
   } catch {
-    // Ignore background progress save failure
+    return
   }
 }
 
@@ -78,37 +78,30 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col bg-black text-xs text-slate-200">
-    <!-- Resume Prompt Banner -->
+  <div class="flex h-full w-full flex-col bg-black text-[12px] text-[#334155]">
     <div
       v-if="resumeOfferSec !== null"
-      class="flex items-center justify-between bg-sky-950/90 px-4 py-2 text-xs text-sky-200"
+      class="flex shrink-0 items-center justify-between gap-2 border-b border-[#b8d4fe] bg-[#eff6ff] px-3.5 py-1.5 text-[#1e3a8a]"
     >
       <span>이전에 시청하던 위치({{ formatDuration(resumeOfferSec) }})가 있습니다.</span>
-      <div class="flex items-center gap-2">
-        <button
-          type="button"
-          class="inline-flex items-center gap-1 rounded-lg bg-sky-500 px-2.5 py-1 font-semibold text-white hover:bg-sky-400"
-          @click="applyResume"
-        >
+      <div class="flex items-center gap-1.5">
+        <button type="button" class="dsm-btn dsm-btn-primary" @click="applyResume">
           <RotateCcw class="h-3.5 w-3.5" />
           이어보기
         </button>
-        <button
-          type="button"
-          class="rounded-lg px-2 py-1 text-slate-300 hover:bg-white/10"
-          @click="resumeOfferSec = null"
-        >
+        <button type="button" class="dsm-btn" @click="resumeOfferSec = null">
           처음부터
         </button>
       </div>
     </div>
 
-    <div v-if="errorMessage" class="bg-rose-500/20 px-4 py-2 text-rose-200">
+    <div
+      v-if="errorMessage"
+      class="shrink-0 border-b border-[#fecdd3] bg-[#fff1f2] px-3.5 py-1.5 text-[#be123c]"
+    >
       {{ errorMessage }}
     </div>
 
-    <!-- Video Element -->
     <div class="relative flex min-h-0 flex-1 items-center justify-center bg-black">
       <video
         ref="videoRef"
@@ -133,26 +126,27 @@ onUnmounted(() => {
       </video>
     </div>
 
-    <!-- Player Info Bar -->
-    <div class="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 bg-slate-950 px-3.5 py-2">
-      <div class="flex min-w-0 items-center gap-3">
-        <span class="truncate font-medium text-white">{{ fileName }}</span>
-        <span v-if="mediaInfo" class="text-slate-400">{{ formatBytes(mediaInfo.size) }}</span>
+    <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#dce2ea] bg-[#f8fafc] px-3 py-1.5 text-[#334155]">
+      <div class="flex min-w-0 items-center gap-2.5">
+        <span class="truncate font-semibold text-[#1e293b]">{{ fileName }}</span>
+        <span v-if="mediaInfo" class="shrink-0 tabular-nums text-[11px] text-[#64748b]">
+          {{ formatBytes(mediaInfo.size) }}
+        </span>
         <span
           v-if="mediaInfo && mediaInfo.subtitles.length > 0"
-          class="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-300"
+          class="inline-flex shrink-0 items-center gap-1 rounded-[3px] border border-[#a7f3d0] bg-[#ecfdf5] px-2 py-0.5 text-[11px] font-medium text-[#047857]"
         >
           <Subtitles class="h-3 w-3" />
           자막 {{ mediaInfo.subtitles.length }}개 자동 연결됨
         </span>
       </div>
 
-      <div class="flex items-center gap-2.5">
-        <label class="flex items-center gap-1.5 text-slate-400">
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-1.5 text-[11px] font-medium text-[#475569]">
           배속
           <select
             v-model.number="playbackRate"
-            class="rounded-md border border-white/10 bg-slate-900 px-2 py-0.5 text-xs text-white focus:outline-none"
+            class="dsm-select"
             @change="updatePlaybackRate"
           >
             <option :value="0.75">0.75x</option>
@@ -163,10 +157,7 @@ onUnmounted(() => {
           </select>
         </label>
 
-        <a
-          :href="api.downloadUrl({ rootId, relPath })"
-          class="inline-flex items-center gap-1 rounded-lg bg-white/10 px-2.5 py-1 text-slate-200 hover:bg-white/15"
-        >
+        <a :href="api.downloadUrl({ rootId, relPath })" class="dsm-btn">
           <Download class="h-3.5 w-3.5" />
           원본 저장
         </a>

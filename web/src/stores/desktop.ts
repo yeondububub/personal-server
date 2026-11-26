@@ -30,29 +30,28 @@ export interface DesktopAppDefinition {
   readonly id: AppId
   readonly title: string
   readonly subtitle: string
-  readonly iconBg: string
   readonly requiresPrivate: boolean
   readonly showOnDesktop: boolean
   readonly defaultWidth: number
   readonly defaultHeight: number
 }
 
-export const DESKTOP_APPS = [
-  {
-    id: 'file-station',
-    title: 'File Station',
-    subtitle: '파일 탐색 · 업로드 · 공유',
-    iconBg: 'from-sky-500 to-blue-600',
-    requiresPrivate: false,
-    showOnDesktop: true,
-    defaultWidth: 960,
-    defaultHeight: 620,
-  },
+const FILE_STATION_APP: DesktopAppDefinition = {
+  id: 'file-station',
+  title: 'File Station',
+  subtitle: '공유 폴더 및 파일 관리',
+  requiresPrivate: false,
+  showOnDesktop: true,
+  defaultWidth: 960,
+  defaultHeight: 620,
+}
+
+export const DESKTOP_APPS: readonly DesktopAppDefinition[] = [
+  FILE_STATION_APP,
   {
     id: 'video-player',
-    title: 'Video Player',
-    subtitle: 'MP4 스트리밍 · 자막 · 이어보기',
-    iconBg: 'from-rose-500 to-orange-500',
+    title: 'Media Player',
+    subtitle: '영상 스트리밍 플레이어',
     requiresPrivate: false,
     showOnDesktop: false,
     defaultWidth: 900,
@@ -60,9 +59,8 @@ export const DESKTOP_APPS = [
   },
   {
     id: 'code-editor',
-    title: 'Code Editor',
-    subtitle: '코드 및 설정 편집기',
-    iconBg: 'from-emerald-500 to-teal-600',
+    title: '텍스트 편집기',
+    subtitle: '코드 및 설정 파일 편집',
     requiresPrivate: false,
     showOnDesktop: false,
     defaultWidth: 880,
@@ -71,8 +69,7 @@ export const DESKTOP_APPS = [
   {
     id: 'mounts',
     title: '마운트 관리',
-    subtitle: '서버 로컬 폴더 연결 · 권한 설정',
-    iconBg: 'from-cyan-500 to-teal-600',
+    subtitle: '서버 로컬 폴더 마운트 및 권한',
     requiresPrivate: true,
     showOnDesktop: true,
     defaultWidth: 820,
@@ -81,8 +78,7 @@ export const DESKTOP_APPS = [
   {
     id: 'wargame',
     title: 'Wargame Runner',
-    subtitle: 'Docker 워게임 자동화 (Tailscale)',
-    iconBg: 'from-violet-500 to-purple-700',
+    subtitle: 'Docker 워게임 자동 실행기',
     requiresPrivate: true,
     showOnDesktop: true,
     defaultWidth: 860,
@@ -90,9 +86,8 @@ export const DESKTOP_APPS = [
   },
   {
     id: 'terminal',
-    title: 'Web Terminal',
-    subtitle: '우분투 호스트 & 컨테이너 쉘',
-    iconBg: 'from-slate-700 to-slate-900',
+    title: '터미널',
+    subtitle: '호스트 및 컨테이너 쉘',
     requiresPrivate: true,
     showOnDesktop: true,
     defaultWidth: 820,
@@ -100,15 +95,14 @@ export const DESKTOP_APPS = [
   },
   {
     id: 'monitor',
-    title: 'Resource Monitor',
-    subtitle: '시스템 리소스 및 디스크 상태',
-    iconBg: 'from-amber-500 to-orange-600',
+    title: '리소스 모니터',
+    subtitle: '시스템 상태 및 볼륨 용량',
     requiresPrivate: false,
     showOnDesktop: true,
     defaultWidth: 740,
     defaultHeight: 500,
   },
-] as const satisfies readonly DesktopAppDefinition[]
+]
 
 export interface WindowInstance {
   id: string
@@ -142,10 +136,7 @@ export const useDesktopStore = defineStore('desktop', () => {
 
   function findAppDef(appId: AppId): DesktopAppDefinition {
     const found = DESKTOP_APPS.find((a) => a.id === appId)
-    if (!found) {
-      return DESKTOP_APPS[0]
-    }
-    return found
+    return found ?? FILE_STATION_APP
   }
 
   function focusWindow(windowId: string): void {
@@ -160,7 +151,6 @@ export const useDesktopStore = defineStore('desktop', () => {
     const appId = params.payload.kind
     const def = findAppDef(appId)
 
-    // Reuse singleton window for apps like monitor/wargame/terminal or matching file path
     const existing = windows.value.find((w) => {
       if (w.payload.kind !== params.payload.kind) return false
       switch (params.payload.kind) {
@@ -198,13 +188,13 @@ export const useDesktopStore = defineStore('desktop', () => {
       return existing.id
     }
 
-    const offset = ((windows.value.length % 6) * 28)
+    const offset = (windows.value.length % 6) * 28
     const maxW = Math.max(360, window.innerWidth - 40)
-    const maxH = Math.max(320, window.innerHeight - 88)
+    const maxH = Math.max(320, window.innerHeight - 76)
     const width = Math.min(def.defaultWidth, maxW)
     const height = Math.min(def.defaultHeight, maxH)
     const x = Math.max(16, Math.min(96 + offset, window.innerWidth - width - 16))
-    const y = Math.max(52, Math.min(64 + offset, window.innerHeight - height - 24))
+    const y = Math.max(44, Math.min(56 + offset, window.innerHeight - height - 20))
 
     nextZIndex.value += 1
     const id = `win-${counter.value++}`

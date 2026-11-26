@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Lock, Server, ShieldCheck, Globe } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
+import DsmWallpaper from './desktop/DsmWallpaper.vue'
 
 const authStore = useAuthStore()
 
@@ -31,69 +31,43 @@ async function handleSubmit(): Promise<void> {
 </script>
 
 <template>
-  <div
-    class="relative flex h-full w-full items-center justify-center overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 p-4"
-  >
-    <!-- Ambient DSM background accents -->
-    <div class="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-sky-500/20 blur-3xl" />
-    <div class="pointer-events-none absolute -right-32 -bottom-32 h-96 w-96 rounded-full bg-indigo-500/20 blur-3xl" />
+  <div class="relative flex h-full w-full items-center justify-center overflow-hidden bg-[#0b3b6e] p-4">
+    <DsmWallpaper theme="ocean" />
 
     <div
-      class="relative z-10 w-full max-w-md rounded-2xl border border-white/15 bg-slate-900/75 p-8 shadow-2xl backdrop-blur-xl"
+      class="relative z-10 w-[360px] max-w-full rounded-[8px] border border-white/60 bg-white/95 p-8 text-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.35)]"
     >
-      <div class="mb-6 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 shadow-lg">
-            <Server class="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <h1 class="text-lg font-semibold text-white">Personal DSM</h1>
-            <p class="text-xs text-slate-400">Ubuntu Integrated Workspace</p>
-          </div>
-        </div>
-
-        <span
-          v-if="authStore.accessTier === 'private'"
-          class="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-300"
-        >
-          <ShieldCheck class="h-3.5 w-3.5" />
-          Tailscale 내부망
-        </span>
-        <span
-          v-else
-          class="inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-300"
-        >
-          <Globe class="h-3.5 w-3.5" />
-          외부 공개망
-        </span>
+      <div class="mb-6">
+        <h1 class="text-[20px] leading-tight font-semibold tracking-tight text-[#1e293b]">Ubuntu-DSM</h1>
+        <p class="mt-1 text-[12px] text-[#64748b]">계정에 로그인</p>
       </div>
 
       <form class="space-y-4" @submit.prevent="handleSubmit">
         <div>
-          <label class="mb-1.5 block text-xs font-medium text-slate-300">관리자 계정</label>
+          <label class="mb-1.5 block text-[12px] font-medium text-[#475569]">계정</label>
           <input
             v-model="username"
             type="text"
             autocomplete="username"
-            class="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-sky-400 focus:outline-none"
-            placeholder="admin"
+            class="dsm-input !h-9 w-full !text-[13px]"
+            placeholder="사용자 아이디"
           />
         </div>
 
         <div>
-          <label class="mb-1.5 block text-xs font-medium text-slate-300">비밀번호</label>
+          <label class="mb-1.5 block text-[12px] font-medium text-[#475569]">비밀번호</label>
           <input
             v-model="password"
             type="password"
             autocomplete="current-password"
-            class="w-full rounded-xl border border-white/10 bg-slate-950/70 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-sky-400 focus:outline-none"
-            placeholder="비밀번호 입력"
+            class="dsm-input !h-9 w-full !text-[13px]"
+            placeholder="비밀번호"
           />
         </div>
 
         <div
           v-if="errorMessage"
-          class="rounded-xl border border-rose-500/30 bg-rose-500/15 px-3.5 py-2.5 text-xs text-rose-200"
+          class="rounded-[4px] border border-[#f5c2c7] bg-[#fff5f5] px-3 py-2 text-[12px] font-medium text-[#c81e3a]"
         >
           {{ errorMessage }}
         </div>
@@ -101,12 +75,34 @@ async function handleSubmit(): Promise<void> {
         <button
           type="submit"
           :disabled="submitting"
-          class="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:from-sky-400 hover:to-blue-500 disabled:opacity-50"
+          class="flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-[4px] bg-[#0572ec] px-4 text-[13px] font-medium text-white transition-colors hover:bg-[#005ec4] disabled:cursor-not-allowed disabled:opacity-55"
         >
-          <Lock class="h-4 w-4" />
-          <span>{{ submitting ? '인증 중...' : '로그인' }}</span>
+          <span>{{ submitting ? '로그인 중...' : '로그인' }}</span>
+          <svg
+            v-if="!submitting"
+            viewBox="0 0 16 16"
+            class="h-3.5 w-3.5 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M3.5 8h9M8.5 4l4 4-4 4" />
+          </svg>
         </button>
       </form>
+    </div>
+
+    <div class="pointer-events-none absolute bottom-5 left-6 z-10 select-none text-[12px] text-white/80">
+      <div class="font-semibold tracking-tight text-white/90">Personal NAS · DSM 7 Style</div>
+      <div class="mt-0.5 flex items-center gap-1.5 text-white/80">
+        <span
+          class="inline-block h-2 w-2 rounded-full"
+          :class="authStore.accessTier === 'private' ? 'bg-[#10b981]' : 'bg-[#60a5fa]'"
+        />
+        <span>{{ authStore.accessTier === 'private' ? 'Tailscale 내부 관리망' : '외부 접속' }}</span>
+      </div>
     </div>
   </div>
 </template>
