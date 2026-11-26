@@ -20,6 +20,7 @@ import (
 	"personal-server/internal/db"
 	"personal-server/internal/files"
 	"personal-server/internal/media"
+	"personal-server/internal/mounts"
 	"personal-server/internal/server"
 	"personal-server/internal/share"
 )
@@ -96,6 +97,10 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 		t.Fatal(err)
 	}
 	jail := files.NewJail(cfg.Storage.Roots)
+	mountSvc, err := mounts.NewService(conn, jail, cfg.Storage.Roots)
+	if err != nil {
+		t.Fatal(err)
+	}
 	filesH := files.NewHandler(jail, cfg.Storage.TempUploadDir)
 	mediaH := media.NewHandler(conn, jail)
 	shareH, err := share.NewHandler(conn, jail, cfg.Server.PublicBaseURL, false)
@@ -110,9 +115,11 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 	deps := server.Dependencies{
 		Config:  cfg,
 		Auth:    authSvc,
+		Jail:    jail,
 		Files:   filesH,
 		Media:   mediaH,
 		Share:   shareH,
+		Mounts:  mountSvc,
 		WebDist: mockWeb,
 		Started: time.Now(),
 	}
@@ -285,5 +292,122 @@ func TestDualListenersChunkedUploadRangeStreamAndShare(t *testing.T) {
 	_ = unlockedSub.Body.Close()
 	if unlockedSub.StatusCode != http.StatusOK || !strings.Contains(string(vttBytes), "WEBVTT") {
 		t.Fatalf("expected VTT subtitle on public share, status=%d body=%q", unlockedSub.StatusCode, string(vttBytes))
+	}
+}
+
+func TestDynamicMountReadOnlyAndPrivateIsolation(t *testing.T) {
+	rt, _ := setupTestRouters(t)
+	pubURL := "http://pub.local"
+	privURL := "http://priv.local"
+
+	privClient := newCookieClient(t, rt)
+	pubClient := newCookieClient(t, rt)
+	loginBody := `{"username":"admin","password":"testpassword123"}`
+
+	for _, pair := range []struct {
+		c   *http.Client
+		url string
+	}{{privClient, privURL}, {pubClient, pubURL}} {
+		r, err := pair.c.Post(pair.url+"/api/auth/login", "application/json", strings.NewReader(loginBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("login failed on %s: %d", pair.url, r.StatusCode)
+		}
+	}
+
+	// 1. Public listener must NOT expose /api/mounts or /api/mounts/browse-host
+	pubMountsResp, err := pubClient.Get(pubURL + "/api/mounts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = pubMountsResp.Body.Close()
+	if pubMountsResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for /api/mounts on public listener, got %d", pubMountsResp.StatusCode)
+	}
+
+	// 2. Create a local host directory with a real file and mount it dynamically via Private listener
+	hostDir := t.TempDir()
+	realHostDir, err := filepath.EvalSymlinks(hostDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sampleFile := filepath.Join(realHostDir, "readme.txt")
+	if err := os.WriteFile(sampleFile, []byte("local host file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	createPayload, _ := json.Marshal(map[string]any{
+		"name":        "Secret Archive",
+		"hostPath":    realHostDir,
+		"readOnly":    true,
+		"privateOnly": true,
+	})
+	createResp, err := privClient.Post(privURL+"/api/mounts", "application/json", bytes.NewReader(createPayload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created struct {
+		Mount struct {
+			ID string `json:"id"`
+		} `json:"mount"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	_ = createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated || created.Mount.ID == "" {
+		t.Fatalf("expected 201 mount created, got %d", createResp.StatusCode)
+	}
+
+	// 3. Private listener can list & read files from the new mount
+	listPriv, err := privClient.Get(privURL + "/api/files/list?root=" + created.Mount.ID + "&path=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listBody, _ := io.ReadAll(listPriv.Body)
+	_ = listPriv.Body.Close()
+	if listPriv.StatusCode != http.StatusOK || !strings.Contains(string(listBody), "readme.txt") {
+		t.Fatalf("expected readme.txt in private listing, status=%d body=%s", listPriv.StatusCode, string(listBody))
+	}
+
+	// 4. Read-only mount rejects mkdir with 403
+	mkdirResp, err := privClient.Post(
+		privURL+"/api/files/mkdir",
+		"application/json",
+		strings.NewReader(`{"rootId":"`+created.Mount.ID+`","relPath":"blocked"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = mkdirResp.Body.Close()
+	if mkdirResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 mkdir on read-only mount, got %d", mkdirResp.StatusCode)
+	}
+
+	// 5. Private-only mount is blocked on Public listener (403)
+	listPub, err := pubClient.Get(pubURL + "/api/files/list?root=" + created.Mount.ID + "&path=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = listPub.Body.Close()
+	if listPub.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for privateOnly mount on public listener, got %d", listPub.StatusCode)
+	}
+
+	// 6. Unmount removes it from API without deleting the actual file on disk
+	delReq, _ := http.NewRequest(http.MethodDelete, privURL+"/api/mounts/"+created.Mount.ID, nil)
+	delResp, err := privClient.Do(delReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delResp.Body.Close()
+	if delResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on unmount, got %d", delResp.StatusCode)
+	}
+	if _, err := os.Stat(sampleFile); err != nil {
+		t.Fatalf("expected real file on disk to remain after unmount, got err: %v", err)
 	}
 }

@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Film,
   FileCode2,
+  HardDrive,
   Cpu,
   Terminal,
   Activity,
@@ -85,6 +86,8 @@ function iconNameFor(appId: AppId): typeof FolderOpen {
       return Film
     case 'code-editor':
       return FileCode2
+    case 'mounts':
+      return HardDrive
     case 'wargame':
       return Cpu
     case 'terminal':

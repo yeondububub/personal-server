@@ -3,8 +3,10 @@ import {
   parseAuthStatus,
   parseCreatedShare,
   parseFileList,
+  parseHostBrowse,
   parseMediaInfo,
   parseMountRoots,
+  parseMountsList,
   parsePublicShare,
   parseSharesList,
   parseSystemSummary,
@@ -13,7 +15,9 @@ import {
   parseUploadOffset,
   type AuthStatus,
   type FileListResult,
+  type HostBrowseResult,
   type MediaInfo,
+  type MountInfo,
   type MountRoot,
   type PublicShareState,
   type ShareItem,
@@ -256,5 +260,54 @@ export const api = {
   async fetchSystemSummary(): Promise<SystemSummary> {
     const raw = await requestJSON('/api/system/summary')
     return parseSystemSummary(raw)
+  },
+
+  async listMounts(): Promise<readonly MountInfo[]> {
+    const raw = await requestJSON('/api/mounts')
+    return parseMountsList(raw)
+  },
+
+  async createMount(params: {
+    readonly name: string
+    readonly hostPath: string
+    readonly readOnly: boolean
+    readonly privateOnly: boolean
+  }): Promise<void> {
+    await requestJSON('/api/mounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+  },
+
+  async updateMount(params: {
+    readonly id: string
+    readonly name: string
+    readonly readOnly: boolean
+    readonly privateOnly: boolean
+  }): Promise<void> {
+    await requestJSON(`/api/mounts/${encodeURIComponent(params.id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: params.name,
+        readOnly: params.readOnly,
+        privateOnly: params.privateOnly,
+      }),
+    })
+  },
+
+  async deleteMount(id: string): Promise<void> {
+    await requestJSON(`/api/mounts/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async browseHostDir(params: { readonly path?: string; readonly showHidden?: boolean }): Promise<HostBrowseResult> {
+    const qs = new URLSearchParams()
+    if (params.path) qs.set('path', params.path)
+    if (params.showHidden) qs.set('hidden', '1')
+    const raw = await requestJSON(`/api/mounts/browse-host?${qs.toString()}`)
+    return parseHostBrowse(raw)
   },
 }

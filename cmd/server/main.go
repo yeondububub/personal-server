@@ -17,6 +17,7 @@ import (
 	"personal-server/internal/db"
 	"personal-server/internal/files"
 	"personal-server/internal/media"
+	"personal-server/internal/mounts"
 	"personal-server/internal/server"
 	"personal-server/internal/share"
 )
@@ -42,6 +43,10 @@ func main() {
 	}
 
 	jail := files.NewJail(cfg.Storage.Roots)
+	mountSvc, err := mounts.NewService(conn, jail, cfg.Storage.Roots)
+	if err != nil {
+		log.Fatalf("init mounts service: %v", err)
+	}
 	filesHandler := files.NewHandler(jail, cfg.Storage.TempUploadDir)
 	mediaHandler := media.NewHandler(conn, jail)
 	shareHandler, err := share.NewHandler(conn, jail, cfg.Server.PublicBaseURL, cfg.Server.CookieSecure)
@@ -57,9 +62,11 @@ func main() {
 	deps := server.Dependencies{
 		Config:  cfg,
 		Auth:    authSvc,
+		Jail:    jail,
 		Files:   filesHandler,
 		Media:   mediaHandler,
 		Share:   shareHandler,
+		Mounts:  mountSvc,
 		WebDist: webFS,
 		Started: time.Now(),
 	}

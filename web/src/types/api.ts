@@ -15,6 +15,35 @@ export type AuthStatus =
 export interface MountRoot {
   readonly id: string
   readonly name: string
+  readonly readOnly: boolean
+  readonly privateOnly: boolean
+}
+
+export interface MountInfo {
+  readonly id: string
+  readonly name: string
+  readonly hostPath: string
+  readonly readOnly: boolean
+  readonly privateOnly: boolean
+  readonly exists: boolean
+  readonly createdAt: number
+}
+
+export interface HostQuickPath {
+  readonly label: string
+  readonly path: string
+}
+
+export interface HostDirEntry {
+  readonly name: string
+  readonly path: string
+}
+
+export interface HostBrowseResult {
+  readonly currentPath: string
+  readonly parentPath: string
+  readonly quickPaths: readonly HostQuickPath[]
+  readonly directories: readonly HostDirEntry[]
 }
 
 export interface FileEntry {
@@ -29,6 +58,7 @@ export interface FileEntry {
 export interface FileListResult {
   readonly rootId: string
   readonly relPath: string
+  readonly readOnly: boolean
   readonly entries: readonly FileEntry[]
 }
 
@@ -39,6 +69,7 @@ export interface TextDocument {
   readonly content: string
   readonly size: number
   readonly modTime: number
+  readonly readOnly: boolean
 }
 
 export interface SubtitleTrack {
@@ -194,11 +225,66 @@ export function parseMountRoots(payload: unknown): readonly MountRoot[] {
       const id = readString(item, 'id')
       const name = readString(item, 'name', id)
       if (id !== '') {
-        out.push({ id, name })
+        out.push({
+          id,
+          name,
+          readOnly: readBoolean(item, 'readOnly'),
+          privateOnly: readBoolean(item, 'privateOnly'),
+        })
       }
     }
   }
   return out
+}
+
+export function parseMountsList(payload: unknown): readonly MountInfo[] {
+  if (!isRecord(payload) || !Array.isArray(payload.mounts)) {
+    return []
+  }
+  const out: MountInfo[] = []
+  for (const item of payload.mounts) {
+    if (!isRecord(item)) continue
+    out.push({
+      id: readString(item, 'id'),
+      name: readString(item, 'name'),
+      hostPath: readString(item, 'hostPath'),
+      readOnly: readBoolean(item, 'readOnly'),
+      privateOnly: readBoolean(item, 'privateOnly'),
+      exists: readBoolean(item, 'exists'),
+      createdAt: readNumber(item, 'createdAt'),
+    })
+  }
+  return out
+}
+
+export function parseHostBrowse(payload: unknown): HostBrowseResult {
+  if (!isRecord(payload)) {
+    throw new Error('호스트 디렉토리 목록 응답이 올바르지 않습니다.')
+  }
+  const quickRaw = Array.isArray(payload.quickPaths) ? payload.quickPaths : []
+  const quickPaths: HostQuickPath[] = []
+  for (const q of quickRaw) {
+    if (!isRecord(q)) continue
+    quickPaths.push({
+      label: readString(q, 'label'),
+      path: readString(q, 'path'),
+    })
+  }
+  const dirsRaw = Array.isArray(payload.directories) ? payload.directories : []
+  const directories: HostDirEntry[] = []
+  for (const d of dirsRaw) {
+    if (!isRecord(d)) continue
+    directories.push({
+      name: readString(d, 'name'),
+      path: readString(d, 'path'),
+    })
+  }
+  return {
+    currentPath: readString(payload, 'currentPath'),
+    parentPath: readString(payload, 'parentPath'),
+    quickPaths,
+    directories,
+  }
 }
 
 export function parseFileList(payload: unknown): FileListResult {
@@ -221,6 +307,7 @@ export function parseFileList(payload: unknown): FileListResult {
   return {
     rootId: readString(payload, 'rootId'),
     relPath: readString(payload, 'relPath'),
+    readOnly: readBoolean(payload, 'readOnly'),
     entries,
   }
 }
@@ -236,6 +323,7 @@ export function parseTextDocument(payload: unknown): TextDocument {
     content: readString(payload, 'content'),
     size: readNumber(payload, 'size'),
     modTime: readNumber(payload, 'modTime'),
+    readOnly: readBoolean(payload, 'readOnly'),
   }
 }
 

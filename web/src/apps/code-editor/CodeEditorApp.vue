@@ -30,6 +30,7 @@ const editorHostRef = ref<HTMLDivElement | null>(null)
 const loading = ref(true)
 const saving = ref(false)
 const dirty = ref(false)
+const readOnly = ref(false)
 const savedNotice = ref(false)
 const errorMessage = ref('')
 const byteSize = ref(0)
@@ -60,7 +61,7 @@ watch(dirty, (isDirty) => {
 })
 
 async function saveDocument(): Promise<void> {
-  if (!view || saving.value) return
+  if (!view || saving.value || readOnly.value) return
   const content = view.state.doc.toString()
   saving.value = true
   errorMessage.value = ''
@@ -89,6 +90,7 @@ onMounted(async () => {
     const doc = await api.readTextFile({ rootId: props.rootId, relPath: props.relPath })
     savedBaseline = doc.content
     byteSize.value = doc.size
+    readOnly.value = doc.readOnly
 
     if (editorHostRef.value) {
       const state = EditorState.create({
@@ -97,6 +99,7 @@ onMounted(async () => {
           basicSetup,
           oneDark,
           languageExtensionFor(props.fileName),
+          EditorState.readOnly.of(doc.readOnly),
           keymap.of([
             {
               key: 'Mod-s',
@@ -157,6 +160,7 @@ onUnmounted(() => {
       </div>
 
       <button
+        v-if="!readOnly"
         type="button"
         :disabled="saving || loading"
         class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
@@ -165,6 +169,12 @@ onUnmounted(() => {
         <Save class="h-3.5 w-3.5" />
         {{ saving ? '저장 중...' : '저장 (⌘/Ctrl+S)' }}
       </button>
+      <span
+        v-else
+        class="rounded-lg border border-amber-400/30 bg-amber-500/15 px-2.5 py-1 text-[11px] font-semibold text-amber-300"
+      >
+        읽기 전용
+      </span>
     </div>
 
     <div

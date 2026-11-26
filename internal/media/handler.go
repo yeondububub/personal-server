@@ -29,12 +29,12 @@ func NewHandler(conn *sql.DB, jail *files.Jail) *Handler {
 	}
 }
 
-func (h *Handler) Routes() chi.Router {
+func (h *Handler) Routes(accessTier string) chi.Router {
 	r := chi.NewRouter()
-	r.Get("/info", h.handleInfo)
-	r.Get("/stream", h.handleStream)
-	r.Get("/subtitle", h.handleSubtitle)
-	r.Put("/progress", h.handleSaveProgress)
+	r.Get("/info", h.handleInfo(accessTier))
+	r.Get("/stream", h.handleStream(accessTier))
+	r.Get("/subtitle", h.handleSubtitle(accessTier))
+	r.Put("/progress", h.handleSaveProgress(accessTier))
 	return r
 }
 
@@ -74,119 +74,127 @@ func ServeVideoRange(w http.ResponseWriter, r *http.Request, realPath string) {
 	http.ServeContent(w, r, st.Name(), st.ModTime(), f)
 }
 
-func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
-	u, ok := auth.UserFromContext(r.Context())
-	if !ok {
-		httputil.WriteError(w, http.StatusUnauthorized, "로그인이 필요합니다.")
-		return
-	}
-	rootID := r.URL.Query().Get("root")
-	rel := r.URL.Query().Get("path")
+func (h *Handler) handleInfo(accessTier string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := auth.UserFromContext(r.Context())
+		if !ok {
+			httputil.WriteError(w, http.StatusUnauthorized, "로그인이 필요합니다.")
+			return
+		}
+		rootID := r.URL.Query().Get("root")
+		rel := r.URL.Query().Get("path")
 
-	realPath, cleanRel, err := h.jail.ResolveExisting(rootID, rel)
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	st, err := os.Stat(realPath)
-	if err != nil || st.IsDir() {
-		httputil.WriteError(w, http.StatusBadRequest, "유효한 영상 파일이 아닙니다.")
-		return
-	}
+		realPath, cleanRel, err := h.jail.ResolveExistingForTier(rootID, rel, accessTier)
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		st, err := os.Stat(realPath)
+		if err != nil || st.IsDir() {
+			httputil.WriteError(w, http.StatusBadRequest, "유효한 영상 파일이 아닙니다.")
+			return
+		}
 
-	var posSec, durSec float64
-	err = h.db.QueryRow(
-		`SELECT position_sec, duration_sec FROM media_progress WHERE user_id = ? AND root_id = ? AND rel_path = ?`,
-		u.ID, rootID, cleanRel,
-	).Scan(&posSec, &durSec)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		posSec = 0
-		durSec = 0
-	}
+		var posSec, durSec float64
+		err = h.db.QueryRow(
+			`SELECT position_sec, duration_sec FROM media_progress WHERE user_id = ? AND root_id = ? AND rel_path = ?`,
+			u.ID, rootID, cleanRel,
+		).Scan(&posSec, &durSec)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			posSec = 0
+			durSec = 0
+		}
 
-	tracks := FindSiblingSubtitles(realPath, cleanRel)
-	if tracks == nil {
-		tracks = []SubtitleTrack{}
-	}
+		tracks := FindSiblingSubtitles(realPath, cleanRel)
+		if tracks == nil {
+			tracks = []SubtitleTrack{}
+		}
 
-	httputil.WriteJSON(w, http.StatusOK, map[string]any{
-		"name":        st.Name(),
-		"rootId":      rootID,
-		"relPath":     cleanRel,
-		"size":        st.Size(),
-		"positionSec": posSec,
-		"durationSec": durSec,
-		"subtitles":   tracks,
-	})
+		httputil.WriteJSON(w, http.StatusOK, map[string]any{
+			"name":        st.Name(),
+			"rootId":      rootID,
+			"relPath":     cleanRel,
+			"size":        st.Size(),
+			"positionSec": posSec,
+			"durationSec": durSec,
+			"subtitles":   tracks,
+		})
+	}
 }
 
-func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
-	rootID := r.URL.Query().Get("root")
-	rel := r.URL.Query().Get("path")
+func (h *Handler) handleStream(accessTier string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rootID := r.URL.Query().Get("root")
+		rel := r.URL.Query().Get("path")
 
-	realPath, _, err := h.jail.ResolveExisting(rootID, rel)
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, err.Error())
-		return
+		realPath, _, err := h.jail.ResolveExistingForTier(rootID, rel, accessTier)
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		ServeVideoRange(w, r, realPath)
 	}
-	ServeVideoRange(w, r, realPath)
 }
 
-func (h *Handler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
-	rootID := r.URL.Query().Get("root")
-	rel := r.URL.Query().Get("path")
+func (h *Handler) handleSubtitle(accessTier string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rootID := r.URL.Query().Get("root")
+		rel := r.URL.Query().Get("path")
 
-	realPath, _, err := h.jail.ResolveExisting(rootID, rel)
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, err.Error())
-		return
+		realPath, _, err := h.jail.ResolveExistingForTier(rootID, rel, accessTier)
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		vtt, err := LoadAsWebVTT(realPath)
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, "자막 변환에 실패했습니다.")
+			return
+		}
+		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(vtt)
 	}
-	vtt, err := LoadAsWebVTT(realPath)
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "자막 변환에 실패했습니다.")
-		return
-	}
-	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(vtt)
 }
 
-func (h *Handler) handleSaveProgress(w http.ResponseWriter, r *http.Request) {
-	u, ok := auth.UserFromContext(r.Context())
-	if !ok {
-		httputil.WriteError(w, http.StatusUnauthorized, "로그인이 필요합니다.")
-		return
+func (h *Handler) handleSaveProgress(accessTier string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := auth.UserFromContext(r.Context())
+		if !ok {
+			httputil.WriteError(w, http.StatusUnauthorized, "로그인이 필요합니다.")
+			return
+		}
+		var req struct {
+			RootID      string  `json:"rootId"`
+			RelPath     string  `json:"relPath"`
+			PositionSec float64 `json:"positionSec"`
+			DurationSec float64 `json:"durationSec"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, "잘못된 요청입니다.")
+			return
+		}
+		_, cleanRel, err := h.jail.ResolveExistingForTier(req.RootID, req.RelPath, accessTier)
+		if err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if req.PositionSec < 0 {
+			req.PositionSec = 0
+		}
+		_, err = h.db.Exec(
+			`INSERT INTO media_progress (user_id, root_id, rel_path, position_sec, duration_sec, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(user_id, root_id, rel_path) DO UPDATE SET
+			   position_sec = excluded.position_sec,
+			   duration_sec = excluded.duration_sec,
+			   updated_at = excluded.updated_at`,
+			u.ID, req.RootID, cleanRel, req.PositionSec, req.DurationSec, time.Now().Unix(),
+		)
+		if err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "재생 위치 저장 실패")
+			return
+		}
+		httputil.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
-	var req struct {
-		RootID      string  `json:"rootId"`
-		RelPath     string  `json:"relPath"`
-		PositionSec float64 `json:"positionSec"`
-		DurationSec float64 `json:"durationSec"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "잘못된 요청입니다.")
-		return
-	}
-	_, cleanRel, err := h.jail.ResolveExisting(req.RootID, req.RelPath)
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.PositionSec < 0 {
-		req.PositionSec = 0
-	}
-	_, err = h.db.Exec(
-		`INSERT INTO media_progress (user_id, root_id, rel_path, position_sec, duration_sec, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(user_id, root_id, rel_path) DO UPDATE SET
-		   position_sec = excluded.position_sec,
-		   duration_sec = excluded.duration_sec,
-		   updated_at = excluded.updated_at`,
-		u.ID, req.RootID, cleanRel, req.PositionSec, req.DurationSec, time.Now().Unix(),
-	)
-	if err != nil {
-		httputil.WriteError(w, http.StatusInternalServerError, "재생 위치 저장 실패")
-		return
-	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

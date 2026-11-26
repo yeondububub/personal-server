@@ -5,6 +5,7 @@ export type AppId =
   | 'file-station'
   | 'video-player'
   | 'code-editor'
+  | 'mounts'
   | 'wargame'
   | 'terminal'
   | 'monitor'
@@ -13,6 +14,7 @@ export type WindowPayload =
   | { readonly kind: 'file-station'; readonly initialRootId?: string; readonly initialPath?: string }
   | { readonly kind: 'video-player'; readonly rootId: string; readonly relPath: string; readonly fileName: string }
   | { readonly kind: 'code-editor'; readonly rootId: string; readonly relPath: string; readonly fileName: string }
+  | { readonly kind: 'mounts' }
   | { readonly kind: 'wargame' }
   | { readonly kind: 'terminal' }
   | { readonly kind: 'monitor' }
@@ -58,6 +60,16 @@ export const DESKTOP_APPS = [
     showOnDesktop: false,
     defaultWidth: 880,
     defaultHeight: 600,
+  },
+  {
+    id: 'mounts',
+    title: '마운트 관리',
+    subtitle: '서버 로컬 폴더 연결 · 권한 설정',
+    iconBg: 'from-cyan-500 to-teal-600',
+    requiresPrivate: true,
+    showOnDesktop: true,
+    defaultWidth: 820,
+    defaultHeight: 560,
   },
   {
     id: 'wargame',
@@ -145,6 +157,7 @@ export const useDesktopStore = defineStore('desktop', () => {
     const existing = windows.value.find((w) => {
       if (w.payload.kind !== params.payload.kind) return false
       switch (params.payload.kind) {
+        case 'mounts':
         case 'wargame':
         case 'terminal':
         case 'monitor':

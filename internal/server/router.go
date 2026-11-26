@@ -17,15 +17,18 @@ import (
 	"personal-server/internal/files"
 	"personal-server/internal/httputil"
 	"personal-server/internal/media"
+	"personal-server/internal/mounts"
 	"personal-server/internal/share"
 )
 
 type Dependencies struct {
 	Config  config.Config
 	Auth    *auth.Service
+	Jail    *files.Jail
 	Files   *files.Handler
 	Media   *media.Handler
 	Share   *share.Handler
+	Mounts  *mounts.Service
 	WebDist fs.FS
 	Started time.Time
 }
@@ -60,14 +63,18 @@ func buildRouter(deps Dependencies, accessTier string) http.Handler {
 		api.Group(func(authed chi.Router) {
 			authed.Use(deps.Auth.RequireAuth)
 			authed.Post("/auth/password", deps.Auth.HandleChangePassword)
-			authed.Mount("/files", deps.Files.Routes())
-			authed.Mount("/media", deps.Media.Routes())
+			authed.Mount("/files", deps.Files.Routes(accessTier))
+			authed.Mount("/media", deps.Media.Routes(accessTier))
 			authed.Mount("/shares", deps.Share.AdminRoutes())
 			authed.Get("/system/summary", handleSystemSummary(deps, accessTier))
 
 			if accessTier == "private" {
+				if deps.Mounts != nil {
+					authed.Mount("/mounts", deps.Mounts.Routes())
+				}
 				authed.Get("/private/capabilities", func(w http.ResponseWriter, _ *http.Request) {
 					httputil.WriteJSON(w, http.StatusOK, map[string]any{
+						"mountsEnabled":   true,
 						"wargameEnabled":  true,
 						"terminalEnabled": true,
 						"phase":           1,
@@ -93,8 +100,12 @@ func handleSystemSummary(deps Dependencies, accessTier string) http.HandlerFunc 
 			TotalBytes uint64 `json:"totalBytes"`
 			FreeBytes  uint64 `json:"freeBytes"`
 		}
-		disks := make([]diskStat, 0, len(deps.Config.Storage.Roots))
-		for _, root := range deps.Config.Storage.Roots {
+		activeRoots := deps.Config.Storage.Roots
+		if deps.Jail != nil {
+			activeRoots = deps.Jail.RootsForTier(accessTier)
+		}
+		disks := make([]diskStat, 0, len(activeRoots))
+		for _, root := range activeRoots {
 			var st syscall.Statfs_t
 			if err := syscall.Statfs(root.Path, &st); err == nil {
 				bsize := uint64(st.Bsize)

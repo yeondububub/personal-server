@@ -62,6 +62,16 @@ CREATE TABLE IF NOT EXISTS media_progress (
 	updated_at INTEGER NOT NULL,
 	PRIMARY KEY (user_id, root_id, rel_path)
 );
+
+CREATE TABLE IF NOT EXISTS mount_roots (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	host_path TEXT NOT NULL,
+	read_only INTEGER NOT NULL DEFAULT 0,
+	private_only INTEGER NOT NULL DEFAULT 0,
+	sort_order INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER NOT NULL
+);
 `
 	if _, err := conn.Exec(schema); err != nil {
 		return fmt.Errorf("migrate sqlite schema: %w", err)

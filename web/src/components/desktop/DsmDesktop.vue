@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { FolderOpen, Cpu, Terminal, Activity, Lock, HardDrive } from 'lucide-vue-next'
 import { useAuthStore } from '../../stores/auth'
 import { DESKTOP_APPS, useDesktopStore, type DesktopAppDefinition } from '../../stores/desktop'
+import { useMountsStore } from '../../stores/mounts'
 import { api } from '../../api/client'
 import type { SystemSummary } from '../../types/api'
 import { formatBytes, formatDuration } from '../../utils/format'
@@ -11,11 +12,13 @@ import DsmWindow from './DsmWindow.vue'
 import FileStationApp from '../../apps/file-station/FileStationApp.vue'
 import VideoPlayerApp from '../../apps/video-player/VideoPlayerApp.vue'
 import CodeEditorApp from '../../apps/code-editor/CodeEditorApp.vue'
+import MountManagerApp from '../../apps/mount-manager/MountManagerApp.vue'
 import MonitorApp from '../../apps/monitor/MonitorApp.vue'
 import PhasePreviewApp from '../../apps/placeholders/PhasePreviewApp.vue'
 
 const authStore = useAuthStore()
 const desktopStore = useDesktopStore()
+const mountsStore = useMountsStore()
 
 const summary = ref<SystemSummary | null>(null)
 const toastMessage = ref('')
@@ -52,6 +55,13 @@ onMounted(() => {
   }
 })
 
+watch(
+  () => mountsStore.version,
+  () => {
+    void refreshSummary()
+  },
+)
+
 onUnmounted(() => {
   if (summaryTimer) clearInterval(summaryTimer)
   if (toastTimer) clearTimeout(toastTimer)
@@ -65,6 +75,9 @@ function handleLaunchApp(app: DesktopAppDefinition): void {
   switch (app.id) {
     case 'file-station':
       desktopStore.openWindow({ title: 'File Station', payload: { kind: 'file-station' } })
+      return
+    case 'mounts':
+      desktopStore.openWindow({ title: '마운트 관리', payload: { kind: 'mounts' } })
       return
     case 'wargame':
       desktopStore.openWindow({ title: 'Wargame Runner', payload: { kind: 'wargame' } })
@@ -89,6 +102,8 @@ function desktopIconComponent(id: DesktopAppDefinition['id']) {
   switch (id) {
     case 'file-station':
       return FolderOpen
+    case 'mounts':
+      return HardDrive
     case 'wargame':
       return Cpu
     case 'terminal':
@@ -212,6 +227,7 @@ function diskUsagePercent(total: number, free: number): number {
           :rel-path="win.payload.relPath"
           :file-name="win.payload.fileName"
         />
+        <MountManagerApp v-else-if="win.payload.kind === 'mounts'" />
         <MonitorApp v-else-if="win.payload.kind === 'monitor'" />
         <PhasePreviewApp
           v-else-if="win.payload.kind === 'wargame' || win.payload.kind === 'terminal'"

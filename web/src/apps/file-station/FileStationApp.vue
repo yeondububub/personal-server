@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   HardDrive,
   Folder,
@@ -18,9 +18,13 @@ import {
   Trash2,
   ChevronRight,
   FilePlus2,
+  Settings2,
+  Lock,
 } from 'lucide-vue-next'
 import { api } from '../../api/client'
+import { useAuthStore } from '../../stores/auth'
 import { useDesktopStore } from '../../stores/desktop'
+import { useMountsStore } from '../../stores/mounts'
 import type { FileEntry, FileKind, MountRoot } from '../../types/api'
 import { formatBytes, formatDateTime } from '../../utils/format'
 import ShareModal from './ShareModal.vue'
@@ -31,11 +35,14 @@ const props = defineProps<{
   readonly initialPath?: string
 }>()
 
+const authStore = useAuthStore()
 const desktopStore = useDesktopStore()
+const mountsStore = useMountsStore()
 
 const roots = ref<readonly MountRoot[]>([])
 const currentRootId = ref('')
 const currentRelPath = ref('')
+const currentReadOnly = ref(false)
 const entries = ref<readonly FileEntry[]>([])
 const selectedRelPath = ref<string | null>(null)
 const loading = ref(false)
@@ -83,6 +90,7 @@ async function loadDirectory(rootId: string, relPath: string): Promise<void> {
     const res = await api.listFiles({ rootId, relPath })
     currentRootId.value = res.rootId
     currentRelPath.value = res.relPath
+    currentReadOnly.value = res.readOnly
     entries.value = res.entries
     selectedRelPath.value = null
     const rootName = roots.value.find((r) => r.id === res.rootId)?.name ?? res.rootId
@@ -98,18 +106,45 @@ async function loadDirectory(rootId: string, relPath: string): Promise<void> {
   }
 }
 
-onMounted(async () => {
+async function refreshRoots(preferredRoot?: string, preferredPath?: string): Promise<void> {
   try {
     roots.value = await api.fetchRoots()
+    const stillExists = roots.value.some((r) => r.id === (preferredRoot ?? currentRootId.value))
+    if (stillExists && (preferredRoot ?? currentRootId.value)) {
+      await loadDirectory(preferredRoot ?? currentRootId.value, preferredPath ?? currentRelPath.value)
+      return
+    }
     const firstRoot = roots.value[0]
-    const targetRoot = props.initialRootId ?? (firstRoot ? firstRoot.id : '')
-    if (targetRoot) {
-      await loadDirectory(targetRoot, props.initialPath ?? '')
+    if (firstRoot) {
+      await loadDirectory(firstRoot.id, '')
+    } else {
+      currentRootId.value = ''
+      currentRelPath.value = ''
+      currentReadOnly.value = false
+      entries.value = []
     }
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '마운트 목록을 불러오지 못했습니다.'
   }
+}
+
+onMounted(() => {
+  void refreshRoots(props.initialRootId, props.initialPath)
 })
+
+watch(
+  () => mountsStore.version,
+  () => {
+    void refreshRoots()
+  },
+)
+
+function openMountManager(): void {
+  desktopStore.openWindow({
+    title: '마운트 관리',
+    payload: { kind: 'mounts' },
+  })
+}
 
 function handleOpenEntry(entry: FileEntry): void {
   if (entry.isDir) {
@@ -194,6 +229,10 @@ function handleFileInputChange(ev: Event): void {
 
 function handleDrop(ev: DragEvent): void {
   dragOver.value = false
+  if (currentReadOnly.value) {
+    errorMessage.value = '읽기 전용으로 마운트된 폴더에는 업로드할 수 없습니다.'
+    return
+  }
   if (ev.dataTransfer?.files && ev.dataTransfer.files.length > 0) {
     void uploadFiles(ev.dataTransfer.files)
   }
@@ -341,14 +380,14 @@ function iconColorForKind(kind: FileKind): string {
     @drop.prevent="handleDrop"
   >
     <!-- Left Sidebar: Mounted Roots -->
-    <aside class="flex w-48 shrink-0 flex-col border-r border-white/10 bg-slate-950/50 p-2.5">
+    <aside class="flex w-52 shrink-0 flex-col border-r border-white/10 bg-slate-950/50 p-2.5">
       <div class="mb-2 px-2 text-[11px] font-semibold tracking-wider text-slate-400">마운트 폴더</div>
-      <nav class="space-y-1">
+      <nav class="min-h-0 flex-1 space-y-1 overflow-y-auto">
         <button
           v-for="root in roots"
           :key="root.id"
           type="button"
-          class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition"
+          class="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left transition"
           :class="
             currentRootId === root.id
               ? 'bg-sky-500/20 font-semibold text-sky-300'
@@ -356,10 +395,29 @@ function iconColorForKind(kind: FileKind): string {
           "
           @click="loadDirectory(root.id, '')"
         >
-          <HardDrive class="h-4 w-4 shrink-0" />
-          <span class="truncate">{{ root.name }}</span>
+          <span class="flex min-w-0 items-center gap-2">
+            <HardDrive class="h-4 w-4 shrink-0" />
+            <span class="truncate">{{ root.name }}</span>
+          </span>
+          <span
+            v-if="root.readOnly"
+            class="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-semibold text-amber-300"
+          >
+            RO
+          </span>
         </button>
       </nav>
+
+      <div v-if="authStore.accessTier === 'private'" class="mt-2 border-t border-white/10 pt-2">
+        <button
+          type="button"
+          class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-400/25 bg-sky-500/10 px-2.5 py-2 text-[11px] font-semibold text-sky-300 transition hover:bg-sky-500/20"
+          @click="openMountManager"
+        >
+          <Settings2 class="h-3.5 w-3.5" />
+          + 폴더 마운트 관리
+        </button>
+      </div>
     </aside>
 
     <!-- Main Content -->
@@ -375,6 +433,7 @@ function iconColorForKind(kind: FileKind): string {
             @change="handleFileInputChange"
           />
           <button
+            v-if="!currentReadOnly"
             type="button"
             class="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 font-semibold text-white hover:bg-sky-500"
             @click="fileInputRef?.click()"
@@ -384,6 +443,7 @@ function iconColorForKind(kind: FileKind): string {
           </button>
 
           <button
+            v-if="!currentReadOnly"
             type="button"
             class="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5 hover:bg-white/10"
             @click="dialog = { kind: 'mkdir', value: '' }"
@@ -393,6 +453,7 @@ function iconColorForKind(kind: FileKind): string {
           </button>
 
           <button
+            v-if="!currentReadOnly"
             type="button"
             class="inline-flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5 hover:bg-white/10"
             @click="dialog = { kind: 'new-file', value: '' }"
@@ -400,6 +461,14 @@ function iconColorForKind(kind: FileKind): string {
             <FilePlus2 class="h-3.5 w-3.5 text-emerald-300" />
             새 파일
           </button>
+
+          <span
+            v-if="currentReadOnly"
+            class="inline-flex items-center gap-1 rounded-lg border border-amber-400/30 bg-amber-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-amber-300"
+          >
+            <Lock class="h-3 w-3" />
+            읽기 전용 폴더
+          </span>
 
           <button
             v-if="selectedEntry && !selectedEntry.isDir"
@@ -432,7 +501,7 @@ function iconColorForKind(kind: FileKind): string {
 
         <div class="flex items-center gap-1">
           <button
-            v-if="selectedEntry"
+            v-if="selectedEntry && !currentReadOnly"
             type="button"
             class="rounded-lg p-1.5 text-slate-300 hover:bg-white/10"
             title="이름 변경"
@@ -441,7 +510,7 @@ function iconColorForKind(kind: FileKind): string {
             <Pencil class="h-3.5 w-3.5" />
           </button>
           <button
-            v-if="selectedEntry"
+            v-if="selectedEntry && !currentReadOnly"
             type="button"
             class="rounded-lg p-1.5 text-rose-300 hover:bg-rose-500/20"
             title="삭제"

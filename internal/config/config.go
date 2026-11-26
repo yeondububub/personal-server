@@ -10,9 +10,11 @@ import (
 )
 
 type MountRoot struct {
-	ID   string `yaml:"id" json:"id"`
-	Name string `yaml:"name" json:"name"`
-	Path string `yaml:"path" json:"-"`
+	ID          string `yaml:"id" json:"id"`
+	Name        string `yaml:"name" json:"name"`
+	Path        string `yaml:"path" json:"-"`
+	ReadOnly    bool   `yaml:"read_only" json:"readOnly"`
+	PrivateOnly bool   `yaml:"private_only" json:"privateOnly"`
 }
 
 type ServerConfig struct {
