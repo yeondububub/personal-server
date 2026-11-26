@@ -14,6 +14,7 @@ import VideoPlayerApp from '../../apps/video-player/VideoPlayerApp.vue'
 import CodeEditorApp from '../../apps/code-editor/CodeEditorApp.vue'
 import MountManagerApp from '../../apps/mount-manager/MountManagerApp.vue'
 import MonitorApp from '../../apps/monitor/MonitorApp.vue'
+import WargameRunnerApp from '../../apps/wargame/WargameRunnerApp.vue'
 import PhasePreviewApp from '../../apps/placeholders/PhasePreviewApp.vue'
 
 const authStore = useAuthStore()
@@ -229,10 +230,11 @@ function diskUsagePercent(total: number, free: number): number {
         />
         <MountManagerApp v-else-if="win.payload.kind === 'mounts'" />
         <MonitorApp v-else-if="win.payload.kind === 'monitor'" />
-        <PhasePreviewApp
-          v-else-if="win.payload.kind === 'wargame' || win.payload.kind === 'terminal'"
-          :mode="win.payload.kind"
+        <WargameRunnerApp
+          v-else-if="win.payload.kind === 'wargame'"
+          :launch-source="win.payload.launchSource"
         />
+        <PhasePreviewApp v-else-if="win.payload.kind === 'terminal'" />
       </DsmWindow>
 
       <!-- Notification Toast -->

@@ -19,6 +19,7 @@ import (
 	"personal-server/internal/media"
 	"personal-server/internal/mounts"
 	"personal-server/internal/share"
+	"personal-server/internal/wargame"
 )
 
 type Dependencies struct {
@@ -29,6 +30,7 @@ type Dependencies struct {
 	Media   *media.Handler
 	Share   *share.Handler
 	Mounts  *mounts.Service
+	Wargame *wargame.Service
 	WebDist fs.FS
 	Started time.Time
 }
@@ -72,12 +74,15 @@ func buildRouter(deps Dependencies, accessTier string) http.Handler {
 				if deps.Mounts != nil {
 					authed.Mount("/mounts", deps.Mounts.Routes())
 				}
+				if deps.Wargame != nil {
+					authed.Mount("/wargames", deps.Wargame.Routes())
+				}
 				authed.Get("/private/capabilities", func(w http.ResponseWriter, _ *http.Request) {
 					httputil.WriteJSON(w, http.StatusOK, map[string]any{
 						"mountsEnabled":   true,
 						"wargameEnabled":  true,
 						"terminalEnabled": true,
-						"phase":           1,
+						"phase":           2,
 					})
 				})
 			}

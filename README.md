@@ -2,14 +2,20 @@
 
 `filebrowser`를 대체하고 Synology DSM 스타일 웹 데스크톱 위에서 파일 탐색, 코드 편집, MP4 영상 스트리밍(자막·이어보기), 외부 공유 링크, 그리고 워게임(CTF) 자동화(Phase 2)를 통합 제공하는 개인 서버 프로젝트입니다.
 
-## 현재 구현 범위 (Phase 1 완료)
+## 현재 구현 범위 (Phase 1 ~ Phase 2 완료)
 
 - **단일 바이너리 구조**: Vue 3(TypeScript) 프론트엔드 빌드 산출물을 Go `embed`로 단일 실행 파일에 통합
 - **Public / Private 이중 리스너 보안 분리**:
   - `public_addr` (기본 `127.0.0.1:8080`): Nginx Proxy Manager(DuckDNS) 연결용. 파일·영상·임시 공유 링크만 노출
-  - `private_addr` (기본 `127.0.0.1:8081`, 실서버에서는 Tailscale IP 바인딩 권장): 모든 관리 기능 및 Tailscale 전용 앱 활성화
+  - `private_addr` (기본 `127.0.0.1:8081`, 실서버에서는 Tailscale IP 바인딩 권장): 마운트 관리·워게임 실행기 등 관리 기능 활성화
 - **인증 및 보안**: Argon2id 비밀번호 해싱, `HttpOnly` + `SameSite=Strict` 세션 쿠키, IP별 로그인 시도 제한(Rate Limit)
 - **DSM 웹 데스크톱**: 창 드래그·리사이즈·최소화·최대화·포커스 관리, 상단 작업표시줄, 우측 디스크/시스템 상태 위젯, 모바일(768px 미만) 전체 화면 반응형 모드
+- **동적 마운트 관리 (Phase 1.5)**: 웹 UI에서 서버 로컬 디렉토리 탐색 피커로 실시간 마운트/해제, 읽기 전용(`RO`) 및 Tailscale 내부망 전용 노출 분리
+- **Wargame Runner (Phase 2)**:
+  - 압축 파일(`.zip`, `.tar.gz`, `.tgz`, `.tar.xz`, `.tar`) 업로드 및 File Station 마운트 폴더/압축 파일 직접 실행 (Zip Slip·심볼릭 링크 차단)
+  - `docker-compose.yml` → `Dockerfile` → 단독 파일(`pwn-socat`, `python-flask`, `php-apache`, `node-express`) 3단계 자동 감지기 및 Compose 위험 옵션 제거
+  - `ps-wargame-net` 컨테이너 간 통신 차단(`enable_icc=false`), CPU/메모리/PID 및 Capabilities 제한, 지정 바인드 IP 동적 포트 할당
+  - 이미지 재사용 1초 리셋, 일시 중지(이미지 보존), 완전 종료(컨테이너·문제 이미지·작업 폴더 일괄 삭제) 및 TTL 자동 정리 워커
 - **File Station**:
   - 지정된 마운트 루트 디렉토리 격리 및 심볼릭 링크 탈출(`EvalSymlinks`) 차단
   - 대용량 파일 청크 업로드(드래그 앤 드롭 지원), 새 폴더/새 파일/이름 변경/삭제

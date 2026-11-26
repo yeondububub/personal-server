@@ -146,6 +146,52 @@ export interface UploadInitResult {
   readonly chunkSize: number
 }
 
+export type WargameMode = 'compose' | 'dockerfile' | 'template'
+
+export type WargameTemplateKind = '' | 'pwn-socat' | 'python-flask' | 'php-apache' | 'node-express'
+
+export type WargameStatus = 'detected' | 'building' | 'running' | 'stopped' | 'failed'
+
+export type WargameConnKind = 'nc' | 'http'
+
+export interface WargamePortBinding {
+  readonly service: string
+  readonly containerPort: number
+  readonly hostPort: number
+  readonly protocol: string
+  readonly connKind: WargameConnKind
+}
+
+export interface WargameInstance {
+  readonly id: string
+  readonly name: string
+  readonly mode: WargameMode
+  readonly templateKind: WargameTemplateKind
+  readonly entrypointFile: string
+  readonly composeFile: string
+  readonly relaxSecurity: boolean
+  readonly status: WargameStatus
+  readonly bindIp: string
+  readonly ports: readonly WargamePortBinding[]
+  readonly warnings: readonly string[]
+  readonly expiresAt: number
+  readonly createdAt: number
+  readonly lastError: string
+}
+
+export interface WargameListResult {
+  readonly dockerAvailable: boolean
+  readonly dockerError: string
+  readonly bindIp: string
+  readonly instances: readonly WargameInstance[]
+}
+
+export interface WargameLogsResult {
+  readonly buildLog: string
+  readonly containerLog: string
+  readonly status: WargameStatus
+}
+
 // Runtime boundary validators
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -462,4 +508,135 @@ export function parseUploadOffset(payload: unknown): number {
     throw new Error('청크 업로드 응답 오류')
   }
   return readNumber(payload, 'offset')
+}
+
+function parseWargameMode(raw: unknown): WargameMode {
+  switch (raw) {
+    case 'compose':
+    case 'dockerfile':
+    case 'template':
+      return raw
+    default:
+      return 'template'
+  }
+}
+
+function parseWargameTemplateKind(raw: unknown): WargameTemplateKind {
+  switch (raw) {
+    case '':
+    case 'pwn-socat':
+    case 'python-flask':
+    case 'php-apache':
+    case 'node-express':
+      return raw
+    default:
+      return ''
+  }
+}
+
+function parseWargameStatus(raw: unknown): WargameStatus {
+  switch (raw) {
+    case 'detected':
+    case 'building':
+    case 'running':
+    case 'stopped':
+    case 'failed':
+      return raw
+    default:
+      return 'detected'
+  }
+}
+
+function parseWargameConnKind(raw: unknown): WargameConnKind {
+  return raw === 'http' ? 'http' : 'nc'
+}
+
+function parseWargamePorts(raw: unknown): readonly WargamePortBinding[] {
+  if (!Array.isArray(raw)) return []
+  const out: WargamePortBinding[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    out.push({
+      service: readString(item, 'service'),
+      containerPort: readNumber(item, 'containerPort'),
+      hostPort: readNumber(item, 'hostPort'),
+      protocol: readString(item, 'protocol', 'tcp'),
+      connKind: parseWargameConnKind(item.connKind),
+    })
+  }
+  return out
+}
+
+function parseStringArray(raw: unknown): readonly string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const item of raw) {
+    if (typeof item === 'string' && item !== '') {
+      out.push(item)
+    }
+  }
+  return out
+}
+
+function parseWargameInstanceRecord(raw: Record<string, unknown>): WargameInstance {
+  return {
+    id: readString(raw, 'id'),
+    name: readString(raw, 'name'),
+    mode: parseWargameMode(raw.mode),
+    templateKind: parseWargameTemplateKind(raw.templateKind),
+    entrypointFile: readString(raw, 'entrypointFile'),
+    composeFile: readString(raw, 'composeFile'),
+    relaxSecurity: readBoolean(raw, 'relaxSecurity'),
+    status: parseWargameStatus(raw.status),
+    bindIp: readString(raw, 'bindIp'),
+    ports: parseWargamePorts(raw.ports),
+    warnings: parseStringArray(raw.warnings),
+    expiresAt: readNumber(raw, 'expiresAt'),
+    createdAt: readNumber(raw, 'createdAt'),
+    lastError: readString(raw, 'lastError'),
+  }
+}
+
+export function parseWargameInstance(payload: unknown): WargameInstance {
+  if (!isRecord(payload)) {
+    throw new Error('워게임 인스턴스 응답이 올바르지 않습니다.')
+  }
+  const target = isRecord(payload.instance) ? payload.instance : payload
+  const instance = parseWargameInstanceRecord(target)
+  if (instance.id === '') {
+    throw new Error('워게임 인스턴스 ID가 누락되었습니다.')
+  }
+  return instance
+}
+
+export function parseWargameList(payload: unknown): WargameListResult {
+  if (!isRecord(payload)) {
+    throw new Error('워게임 목록 응답이 올바르지 않습니다.')
+  }
+  const instancesRaw = Array.isArray(payload.instances) ? payload.instances : []
+  const instances: WargameInstance[] = []
+  for (const item of instancesRaw) {
+    if (!isRecord(item)) continue
+    const parsed = parseWargameInstanceRecord(item)
+    if (parsed.id !== '') {
+      instances.push(parsed)
+    }
+  }
+  return {
+    dockerAvailable: readBoolean(payload, 'dockerAvailable'),
+    dockerError: readString(payload, 'dockerError'),
+    bindIp: readString(payload, 'bindIp'),
+    instances,
+  }
+}
+
+export function parseWargameLogs(payload: unknown): WargameLogsResult {
+  if (!isRecord(payload)) {
+    throw new Error('워게임 로그 응답이 올바르지 않습니다.')
+  }
+  return {
+    buildLog: readString(payload, 'buildLog'),
+    containerLog: readString(payload, 'containerLog'),
+    status: parseWargameStatus(payload.status),
+  }
 }

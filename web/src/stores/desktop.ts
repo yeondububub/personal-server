@@ -10,12 +10,19 @@ export type AppId =
   | 'terminal'
   | 'monitor'
 
+export interface WargameLaunchSource {
+  readonly rootId: string
+  readonly relPath: string
+  readonly name: string
+  readonly nonce: number
+}
+
 export type WindowPayload =
   | { readonly kind: 'file-station'; readonly initialRootId?: string; readonly initialPath?: string }
   | { readonly kind: 'video-player'; readonly rootId: string; readonly relPath: string; readonly fileName: string }
   | { readonly kind: 'code-editor'; readonly rootId: string; readonly relPath: string; readonly fileName: string }
   | { readonly kind: 'mounts' }
-  | { readonly kind: 'wargame' }
+  | { readonly kind: 'wargame'; readonly launchSource?: WargameLaunchSource }
   | { readonly kind: 'terminal' }
   | { readonly kind: 'monitor' }
 
@@ -184,6 +191,9 @@ export const useDesktopStore = defineStore('desktop', () => {
     })
 
     if (existing) {
+      if (params.payload.kind === 'wargame' && params.payload.launchSource) {
+        existing.payload = params.payload
+      }
       focusWindow(existing.id)
       return existing.id
     }

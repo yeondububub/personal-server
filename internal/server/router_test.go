@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"personal-server/internal/mounts"
 	"personal-server/internal/server"
 	"personal-server/internal/share"
+	"personal-server/internal/wargame"
 )
 
 type dualHandlerTransport struct {
@@ -84,6 +86,14 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 			InitialAdminPassword: "testpassword123",
 			SessionTTLHours:      24,
 		},
+		Wargame: config.WargameConfig{
+			BindIP:          "100.64.0.10",
+			PortStart:       31000,
+			PortEnd:         31099,
+			WorkDir:         filepath.Join(realTmp, "wargames"),
+			DefaultTTLHours: 3,
+			MaxArchiveBytes: 64 * 1024 * 1024,
+		},
 	}
 
 	conn, err := db.Open(cfg.Storage.DatabasePath)
@@ -107,6 +117,10 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 	if err != nil {
 		t.Fatal(err)
 	}
+	wgSvc, err := wargame.NewService(conn, jail, cfg.Wargame)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	mockWeb := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><title>DSM</title>")},
@@ -120,6 +134,7 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 		Media:   mediaH,
 		Share:   shareH,
 		Mounts:  mountSvc,
+		Wargame: wgSvc,
 		WebDist: mockWeb,
 		Started: time.Now(),
 	}
@@ -409,5 +424,190 @@ func TestDynamicMountReadOnlyAndPrivateIsolation(t *testing.T) {
 	}
 	if _, err := os.Stat(sampleFile); err != nil {
 		t.Fatalf("expected real file on disk to remain after unmount, got err: %v", err)
+	}
+}
+
+func TestWargamePrivateOnlyPrepareDownloadAndDelete(t *testing.T) {
+	rt, mediaRoot := setupTestRouters(t)
+	pubURL := "http://pub.local"
+	privURL := "http://priv.local"
+
+	privClient := newCookieClient(t, rt)
+	pubClient := newCookieClient(t, rt)
+	loginBody := `{"username":"admin","password":"testpassword123"}`
+
+	for _, pair := range []struct {
+		c   *http.Client
+		url string
+	}{{privClient, privURL}, {pubClient, pubURL}} {
+		r, err := pair.c.Post(pair.url+"/api/auth/login", "application/json", strings.NewReader(loginBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("login failed on %s: %d", pair.url, r.StatusCode)
+		}
+	}
+
+	pubWgResp, err := pubClient.Get(pubURL + "/api/wargames")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = pubWgResp.Body.Close()
+	if pubWgResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for /api/wargames on public listener, got %d", pubWgResp.StatusCode)
+	}
+
+	privWgResp, err := privClient.Get(privURL + "/api/wargames")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var initialList struct {
+		BindIP    string                    `json:"bindIp"`
+		Instances []wargame.WargameInstance `json:"instances"`
+	}
+	if err := json.NewDecoder(privWgResp.Body).Decode(&initialList); err != nil {
+		t.Fatal(err)
+	}
+	_ = privWgResp.Body.Close()
+	if privWgResp.StatusCode != http.StatusOK || initialList.BindIP != "100.64.0.10" {
+		t.Fatalf("expected 200 and bindIp 100.64.0.10 on private /api/wargames, got status=%d bindIp=%q", privWgResp.StatusCode, initialList.BindIP)
+	}
+
+	challDir := filepath.Join(mediaRoot, "bof101")
+	if err := os.MkdirAll(challDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	elfPayload := append([]byte{0x7f, 'E', 'L', 'F'}, []byte("fake-elf-binary")...)
+	if err := os.WriteFile(filepath.Join(challDir, "chall"), elfPayload, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(challDir, "readme.txt"), []byte("exploit me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prepResp, err := privClient.Post(
+		privURL+"/api/wargames/prepare/mount",
+		"application/json",
+		strings.NewReader(`{"rootId":"media","relPath":"bof101","name":"BOF 101"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prepared struct {
+		Instance wargame.WargameInstance `json:"instance"`
+	}
+	if err := json.NewDecoder(prepResp.Body).Decode(&prepared); err != nil {
+		t.Fatal(err)
+	}
+	_ = prepResp.Body.Close()
+	if prepResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 from prepare/mount, got %d", prepResp.StatusCode)
+	}
+	if prepared.Instance.Status != "detected" || prepared.Instance.Mode != "template" || prepared.Instance.TemplateKind != "pwn-socat" || prepared.Instance.EntrypointFile != "chall" {
+		t.Fatalf("unexpected detected instance: %+v", prepared.Instance)
+	}
+	if len(prepared.Instance.Ports) != 1 || prepared.Instance.Ports[0].ContainerPort != 9000 || prepared.Instance.Ports[0].ConnKind != "nc" {
+		t.Fatalf("unexpected detected ports: %+v", prepared.Instance.Ports)
+	}
+
+	extResp, err := privClient.Post(privURL+"/api/wargames/"+prepared.Instance.ID+"/extend", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var extended struct {
+		Instance wargame.WargameInstance `json:"instance"`
+	}
+	if err := json.NewDecoder(extResp.Body).Decode(&extended); err != nil {
+		t.Fatal(err)
+	}
+	_ = extResp.Body.Close()
+	if extResp.StatusCode != http.StatusOK || extended.Instance.ExpiresAt <= prepared.Instance.ExpiresAt {
+		t.Fatalf("expected extended expiresAt > %d, got status=%d expiresAt=%d", prepared.Instance.ExpiresAt, extResp.StatusCode, extended.Instance.ExpiresAt)
+	}
+
+	srcResp, err := privClient.Get(privURL + "/api/wargames/" + prepared.Instance.ID + "/source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zipBytes, err := io.ReadAll(srcResp.Body)
+	_ = srcResp.Body.Close()
+	if err != nil || srcResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 source zip, got status=%d err=%v", srcResp.StatusCode, err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		t.Fatalf("invalid source zip stream: %v", err)
+	}
+	foundNames := make(map[string]bool)
+	for _, f := range zr.File {
+		foundNames[f.Name] = true
+	}
+	if !foundNames["chall"] || !foundNames["readme.txt"] {
+		t.Fatalf("expected chall and readme.txt in source zip, got %v", foundNames)
+	}
+
+	delReq, _ := http.NewRequest(http.MethodDelete, privURL+"/api/wargames/"+prepared.Instance.ID, nil)
+	delResp, err := privClient.Do(delReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delResp.Body.Close()
+	if delResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on wargame delete, got %d", delResp.StatusCode)
+	}
+
+	afterListResp, err := privClient.Get(privURL + "/api/wargames")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var afterList struct {
+		Instances []wargame.WargameInstance `json:"instances"`
+	}
+	if err := json.NewDecoder(afterListResp.Body).Decode(&afterList); err != nil {
+		t.Fatal(err)
+	}
+	_ = afterListResp.Body.Close()
+	if len(afterList.Instances) != 0 {
+		t.Fatalf("expected 0 instances after delete, got %d", len(afterList.Instances))
+	}
+
+	var zipBuf bytes.Buffer
+	zw := zip.NewWriter(&zipBuf)
+	zfWriter, err := zw.Create("webchall/app.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = zfWriter.Write([]byte("from flask import Flask\napp = Flask(__name__)\n"))
+	_ = zw.Close()
+
+	var mpBody bytes.Buffer
+	boundary := "----psWargameTestBoundary"
+	mpBody.WriteString("--" + boundary + "\r\n")
+	mpBody.WriteString("Content-Disposition: form-data; name=\"name\"\r\n\r\nFlask Web\r\n")
+	mpBody.WriteString("--" + boundary + "\r\n")
+	mpBody.WriteString("Content-Disposition: form-data; name=\"file\"; filename=\"webchall.zip\"\r\n")
+	mpBody.WriteString("Content-Type: application/zip\r\n\r\n")
+	mpBody.Write(zipBuf.Bytes())
+	mpBody.WriteString("\r\n--" + boundary + "--\r\n")
+
+	uploadResp, err := privClient.Post(
+		privURL+"/api/wargames/prepare/upload",
+		"multipart/form-data; boundary="+boundary,
+		&mpBody,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var uploaded struct {
+		Instance wargame.WargameInstance `json:"instance"`
+	}
+	if err := json.NewDecoder(uploadResp.Body).Decode(&uploaded); err != nil {
+		t.Fatal(err)
+	}
+	_ = uploadResp.Body.Close()
+	if uploadResp.StatusCode != http.StatusCreated || uploaded.Instance.TemplateKind != "python-flask" || uploaded.Instance.Name != "Flask Web" {
+		t.Fatalf("expected 201 python-flask from prepare/upload, got status=%d inst=%+v", uploadResp.StatusCode, uploaded.Instance)
 	}
 }

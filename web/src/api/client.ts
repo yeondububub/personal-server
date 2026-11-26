@@ -13,6 +13,9 @@ import {
   parseTextDocument,
   parseUploadInit,
   parseUploadOffset,
+  parseWargameInstance,
+  parseWargameList,
+  parseWargameLogs,
   type AuthStatus,
   type FileListResult,
   type HostBrowseResult,
@@ -24,6 +27,11 @@ import {
   type SharesListResult,
   type SystemSummary,
   type TextDocument,
+  type WargameConnKind,
+  type WargameInstance,
+  type WargameListResult,
+  type WargameLogsResult,
+  type WargameTemplateKind,
 } from '../types/api'
 
 async function requestJSON(url: string, init?: RequestInit): Promise<unknown> {
@@ -309,5 +317,101 @@ export const api = {
     if (params.showHidden) qs.set('hidden', '1')
     const raw = await requestJSON(`/api/mounts/browse-host?${qs.toString()}`)
     return parseHostBrowse(raw)
+  },
+
+  async listWargames(): Promise<WargameListResult> {
+    const raw = await requestJSON('/api/wargames')
+    return parseWargameList(raw)
+  },
+
+  async prepareWargameUpload(params: {
+    readonly file: File
+    readonly name?: string
+  }): Promise<WargameInstance> {
+    const form = new FormData()
+    form.append('file', params.file)
+    if (params.name && params.name.trim() !== '') {
+      form.append('name', params.name.trim())
+    }
+    const raw = await requestJSON('/api/wargames/prepare/upload', {
+      method: 'POST',
+      body: form,
+    })
+    return parseWargameInstance(raw)
+  },
+
+  async prepareWargameMount(params: {
+    readonly rootId: string
+    readonly relPath: string
+    readonly name?: string
+  }): Promise<WargameInstance> {
+    const raw = await requestJSON('/api/wargames/prepare/mount', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rootId: params.rootId,
+        relPath: params.relPath,
+        name: params.name ?? '',
+      }),
+    })
+    return parseWargameInstance(raw)
+  },
+
+  async startWargame(params: {
+    readonly id: string
+    readonly name: string
+    readonly templateKind: WargameTemplateKind
+    readonly containerPort: number
+    readonly connKind: WargameConnKind
+    readonly relaxSecurity: boolean
+  }): Promise<WargameInstance> {
+    const raw = await requestJSON(`/api/wargames/${encodeURIComponent(params.id)}/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: params.name,
+        templateKind: params.templateKind,
+        containerPort: params.containerPort,
+        connKind: params.connKind,
+        relaxSecurity: params.relaxSecurity,
+      }),
+    })
+    return parseWargameInstance(raw)
+  },
+
+  async resetWargame(id: string): Promise<WargameInstance> {
+    const raw = await requestJSON(`/api/wargames/${encodeURIComponent(id)}/reset`, {
+      method: 'POST',
+    })
+    return parseWargameInstance(raw)
+  },
+
+  async stopWargame(id: string): Promise<WargameInstance> {
+    const raw = await requestJSON(`/api/wargames/${encodeURIComponent(id)}/stop`, {
+      method: 'POST',
+    })
+    return parseWargameInstance(raw)
+  },
+
+  async deleteWargame(id: string): Promise<void> {
+    await requestJSON(`/api/wargames/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async extendWargame(id: string): Promise<WargameInstance> {
+    const raw = await requestJSON(`/api/wargames/${encodeURIComponent(id)}/extend`, {
+      method: 'POST',
+    })
+    return parseWargameInstance(raw)
+  },
+
+  async fetchWargameLogs(id: string): Promise<WargameLogsResult> {
+    const raw = await requestJSON(`/api/wargames/${encodeURIComponent(id)}/logs`)
+    return parseWargameLogs(raw)
+  },
+
+  wargameSourceUrl(id: string): string {
+    return `/api/wargames/${encodeURIComponent(id)}/source`
   },
 }

@@ -72,6 +72,27 @@ CREATE TABLE IF NOT EXISTS mount_roots (
 	sort_order INTEGER NOT NULL DEFAULT 0,
 	created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS wargame_instances (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	mode TEXT NOT NULL,
+	template_kind TEXT NOT NULL DEFAULT '',
+	entrypoint_file TEXT NOT NULL DEFAULT '',
+	compose_file TEXT NOT NULL DEFAULT '',
+	relax_security INTEGER NOT NULL DEFAULT 0,
+	status TEXT NOT NULL,
+	work_dir TEXT NOT NULL,
+	image_tag TEXT NOT NULL DEFAULT '',
+	container_id TEXT NOT NULL DEFAULT '',
+	ports_json TEXT NOT NULL DEFAULT '[]',
+	warnings_json TEXT NOT NULL DEFAULT '[]',
+	expires_at INTEGER NOT NULL,
+	created_at INTEGER NOT NULL,
+	last_error TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_wargame_expires ON wargame_instances(expires_at);
 `
 	if _, err := conn.Exec(schema); err != nil {
 		return fmt.Errorf("migrate sqlite schema: %w", err)

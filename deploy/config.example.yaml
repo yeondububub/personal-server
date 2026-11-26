@@ -26,3 +26,13 @@ auth:
   initial_admin_username: "admin"
   initial_admin_password: "changeme123!"
   session_ttl_hours: 168
+
+wargame:
+  # 워게임 컨테이너 포트를 바인딩할 인터페이스 IP (실서버에서는 Tailscale IP 예: "100.x.y.z" 권장)
+  bind_ip: "127.0.0.1"
+  port_start: 30000
+  port_end: 39999
+  work_dir: "./data/wargames"
+  default_ttl_hours: 3
+  max_archive_bytes: 1073741824
+

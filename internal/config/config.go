@@ -36,10 +36,20 @@ type AuthConfig struct {
 	SessionTTLHours      int    `yaml:"session_ttl_hours"`
 }
 
+type WargameConfig struct {
+	BindIP          string `yaml:"bind_ip"`
+	PortStart       int    `yaml:"port_start"`
+	PortEnd         int    `yaml:"port_end"`
+	WorkDir         string `yaml:"work_dir"`
+	DefaultTTLHours int    `yaml:"default_ttl_hours"`
+	MaxArchiveBytes int64  `yaml:"max_archive_bytes"`
+}
+
 type Config struct {
 	Server  ServerConfig  `yaml:"server"`
 	Storage StorageConfig `yaml:"storage"`
 	Auth    AuthConfig    `yaml:"auth"`
+	Wargame WargameConfig `yaml:"wargame"`
 }
 
 func Default() Config {
@@ -63,6 +73,14 @@ func Default() Config {
 			InitialAdminPassword: "admin1234!",
 			SessionTTLHours:      168,
 		},
+		Wargame: WargameConfig{
+			BindIP:          "127.0.0.1",
+			PortStart:       30000,
+			PortEnd:         39999,
+			WorkDir:         "./data/wargames",
+			DefaultTTLHours: 3,
+			MaxArchiveBytes: 1024 * 1024 * 1024,
+		},
 	}
 }
 
@@ -81,6 +99,32 @@ func Load(path string) (Config, error) {
 
 	if cfg.Auth.SessionTTLHours <= 0 {
 		cfg.Auth.SessionTTLHours = 168
+	}
+	if cfg.Wargame.BindIP == "" {
+		cfg.Wargame.BindIP = "127.0.0.1"
+	}
+	if cfg.Wargame.PortStart <= 0 {
+		cfg.Wargame.PortStart = 30000
+	}
+	if cfg.Wargame.PortEnd <= cfg.Wargame.PortStart {
+		cfg.Wargame.PortEnd = cfg.Wargame.PortStart + 9999
+	}
+	if cfg.Wargame.DefaultTTLHours <= 0 {
+		cfg.Wargame.DefaultTTLHours = 3
+	}
+	if cfg.Wargame.MaxArchiveBytes <= 0 {
+		cfg.Wargame.MaxArchiveBytes = 1024 * 1024 * 1024
+	}
+	if cfg.Wargame.WorkDir == "" {
+		cfg.Wargame.WorkDir = "./data/wargames"
+	}
+	if err := os.MkdirAll(cfg.Wargame.WorkDir, 0o755); err != nil {
+		return Config{}, fmt.Errorf("create wargame dir: %w", err)
+	}
+	if wgAbs, err := filepath.Abs(cfg.Wargame.WorkDir); err == nil {
+		if wgReal, evalErr := filepath.EvalSymlinks(wgAbs); evalErr == nil {
+			cfg.Wargame.WorkDir = wgReal
+		}
 	}
 	if len(cfg.Storage.Roots) == 0 {
 		return Config{}, errors.New("storage.roots must contain at least one directory")

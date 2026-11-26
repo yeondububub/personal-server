@@ -20,6 +20,7 @@ import {
   FilePlus2,
   Settings2,
   Lock,
+  Cpu,
 } from 'lucide-vue-next'
 import { api } from '../../api/client'
 import { useAuthStore } from '../../stores/auth'
@@ -188,6 +189,23 @@ function openSelectedInEditor(): void {
       rootId: currentRootId.value,
       relPath: entry.relPath,
       fileName: entry.name,
+    },
+  })
+}
+
+function launchSelectedInWargame(): void {
+  const entry = selectedEntry.value
+  if (!entry || (!entry.isDir && entry.kind !== 'archive') || !currentRootId.value) return
+  desktopStore.openWindow({
+    title: 'Wargame Runner',
+    payload: {
+      kind: 'wargame',
+      launchSource: {
+        rootId: currentRootId.value,
+        relPath: entry.relPath,
+        name: entry.name,
+        nonce: Date.now(),
+      },
     },
   })
 }
@@ -478,6 +496,20 @@ function iconColorForKind(kind: FileKind): string {
           >
             <FileCode2 class="h-3.5 w-3.5 text-emerald-300" />
             편집
+          </button>
+
+          <button
+            v-if="
+              authStore.accessTier === 'private' &&
+              selectedEntry &&
+              (selectedEntry.isDir || selectedEntry.kind === 'archive')
+            "
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/30 bg-violet-500/15 px-2.5 py-1.5 font-semibold text-violet-200 hover:bg-violet-500/25"
+            @click="launchSelectedInWargame"
+          >
+            <Cpu class="h-3.5 w-3.5 text-violet-300" />
+            워게임 실행
           </button>
 
           <button

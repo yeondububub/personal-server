@@ -20,6 +20,7 @@ import (
 	"personal-server/internal/mounts"
 	"personal-server/internal/server"
 	"personal-server/internal/share"
+	"personal-server/internal/wargame"
 )
 
 func main() {
@@ -53,11 +54,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("init share handler: %v", err)
 	}
+	wgSvc, err := wargame.NewService(conn, jail, cfg.Wargame)
+	if err != nil {
+		log.Fatalf("init wargame service: %v", err)
+	}
 
 	webFS, err := personalserver.WebDistFS()
 	if err != nil {
 		log.Fatalf("load embedded web dist: %v", err)
 	}
+
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	wgSvc.StartBackground(sigCtx)
 
 	deps := server.Dependencies{
 		Config:  cfg,
@@ -67,6 +76,7 @@ func main() {
 		Media:   mediaHandler,
 		Share:   shareHandler,
 		Mounts:  mountSvc,
+		Wargame: wgSvc,
 		WebDist: webFS,
 		Started: time.Now(),
 	}
@@ -102,9 +112,6 @@ func main() {
 			}
 		}()
 	}
-
-	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	select {
 	case srvErr := <-errCh:
