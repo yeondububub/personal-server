@@ -1,0 +1,17 @@
+[Unit]
+Description=Personal Ubuntu Server Integrated Environment (DSM-style)
+After=network-online.target docker.service tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/personal-server
+ExecStart=/opt/personal-server/personal-server -config /opt/personal-server/config.yaml
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

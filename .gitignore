@@ -1,0 +1,16 @@
+# Binaries
+/bin/
+/personal-server
+*.exe
+
+# Runtime data (dev)
+/data/
+*.db
+*.db-shm
+*.db-wal
+config.yaml
+
+# Frontend
+/web/node_modules/
+/web/dist/
+.DS_Store

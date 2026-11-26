@@ -1,0 +1,28 @@
+server:
+  # NPM(Nginx Proxy Manager)이 프록시할 외부 공개 리스너 (파일/영상/공유 링크만 허용)
+  public_addr: "127.0.0.1:8080"
+  # Tailscale IP 전용 내부 관리 리스너 (모든 기능 + 워게임 + 터미널 허용)
+  # 실서버에서는 "100.x.y.z:8081" 형태로 Tailscale 인터페이스 IP를 지정하세요.
+  private_addr: "127.0.0.1:8081"
+  # 외부 공유 링크 생성 시 표시할 기본 도메인 (비워두면 현재 접속 Host 헤더 사용)
+  public_base_url: "https://example.duckdns.org"
+  # 쿠키 Secure 플래그 (HTTPS 프록시 뒤에서 운영 시 true 권장)
+  cookie_secure: false
+
+storage:
+  database_path: "./data/personal-server.db"
+  temp_upload_dir: "./data/uploads"
+  # File Station에 마운트할 허용 루트 디렉토리 목록
+  roots:
+    - id: "media"
+      name: "Media (영상/미디어)"
+      path: "/data/media"
+    - id: "workspace"
+      name: "Workspace (작업 폴더)"
+      path: "/home/ubuntu/workspace"
+
+auth:
+  # 최초 실행 시 관리자 계정이 없을 때 생성할 초기 계정 정보
+  initial_admin_username: "admin"
+  initial_admin_password: "changeme123!"
+  session_ttl_hours: 168
