@@ -86,6 +86,7 @@ func (h *Handler) Routes(accessTier string) chi.Router {
 	r.Get("/list", h.handleList(accessTier))
 	r.Post("/mkdir", h.handleMkdir(accessTier))
 	r.Post("/rename", h.handleRename(accessTier))
+	r.Post("/move", h.handleMove(accessTier))
 	r.Post("/delete", h.handleDelete(accessTier))
 	r.Get("/text", h.handleReadText(accessTier))
 	r.Put("/text", h.handleWriteText(accessTier))
@@ -258,6 +259,160 @@ func (h *Handler) handleRename(accessTier string) http.HandlerFunc {
 		}
 		httputil.WriteJSON(w, http.StatusOK, map[string]any{"relPath": cleanTo})
 	}
+}
+
+func (h *Handler) handleMove(accessTier string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			FromRootID string `json:"fromRootId"`
+			FromRel    string `json:"fromRel"`
+			ToRootID   string `json:"toRootId"`
+			ToDirRel   string `json:"toDirRel"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			httputil.WriteError(w, http.StatusBadRequest, "잘못된 요청입니다.")
+			return
+		}
+		if strings.TrimSpace(req.FromRel) == "" {
+			httputil.WriteError(w, http.StatusBadRequest, "루트 디렉토리는 이동할 수 없습니다.")
+			return
+		}
+		if err := h.jail.CheckWritable(req.FromRootID, accessTier); err != nil {
+			writeJailError(w, err)
+			return
+		}
+		if err := h.jail.CheckWritable(req.ToRootID, accessTier); err != nil {
+			writeJailError(w, err)
+			return
+		}
+
+		srcReal, srcCleanRel, err := h.jail.ResolveExistingForTier(req.FromRootID, req.FromRel, accessTier)
+		if err != nil {
+			writeJailError(w, err)
+			return
+		}
+		srcInfo, err := os.Lstat(srcReal)
+		if err != nil {
+			writeJailError(w, err)
+			return
+		}
+
+		dstDirReal, dstDirCleanRel, err := h.jail.ResolveExistingForTier(req.ToRootID, req.ToDirRel, accessTier)
+		if err != nil {
+			writeJailError(w, err)
+			return
+		}
+		dstDirInfo, err := os.Stat(dstDirReal)
+		if err != nil || !dstDirInfo.IsDir() {
+			httputil.WriteError(w, http.StatusBadRequest, "이동 대상 경로가 폴더가 아닙니다.")
+			return
+		}
+
+		leafName := filepath.Base(srcCleanRel)
+		targetRel := leafName
+		if dstDirCleanRel != "" {
+			targetRel = dstDirCleanRel + "/" + leafName
+		}
+
+		dstReal, cleanTo, err := h.jail.ResolveCreateTargetForTier(req.ToRootID, targetRel, accessTier)
+		if err != nil {
+			writeJailError(w, err)
+			return
+		}
+
+		if srcReal == dstReal {
+			httputil.WriteJSON(w, http.StatusOK, map[string]any{
+				"rootId":  req.ToRootID,
+				"relPath": cleanTo,
+				"moved":   false,
+			})
+			return
+		}
+
+		if srcInfo.IsDir() && strings.HasPrefix(dstReal, srcReal+string(os.PathSeparator)) {
+			httputil.WriteError(w, http.StatusBadRequest, "폴더를 자기 자신의 하위 폴더로 이동할 수 없습니다.")
+			return
+		}
+
+		if _, err := os.Lstat(dstReal); err == nil {
+			httputil.WriteError(w, http.StatusConflict, "대상 폴더에 이미 같은 이름의 파일이나 폴더가 있습니다.")
+			return
+		}
+
+		if err := moveEntryCrossDeviceSafe(srcReal, dstReal, srcInfo); err != nil {
+			httputil.WriteError(w, http.StatusInternalServerError, "파일 이동에 실패했습니다.")
+			return
+		}
+
+		httputil.WriteJSON(w, http.StatusOK, map[string]any{
+			"rootId":  req.ToRootID,
+			"relPath": cleanTo,
+			"moved":   true,
+		})
+	}
+}
+
+func moveEntryCrossDeviceSafe(srcPath, dstPath string, srcInfo os.FileInfo) error {
+	if err := os.Rename(srcPath, dstPath); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+
+	if !srcInfo.IsDir() {
+		return moveFileCrossDeviceSafe(srcPath, dstPath)
+	}
+
+	if err := copyDirRecursive(srcPath, dstPath); err != nil {
+		_ = os.RemoveAll(dstPath)
+		return err
+	}
+	return os.RemoveAll(srcPath)
+}
+
+func copyDirRecursive(srcDir, dstDir string) error {
+	return filepath.WalkDir(srcDir, func(current string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(srcDir, current)
+		if err != nil {
+			return err
+		}
+		target := dstDir
+		if rel != "." {
+			target = filepath.Join(dstDir, rel)
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("심볼릭 링크는 다른 볼륨으로 이동할 수 없습니다")
+		}
+		if d.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		return copySingleFile(current, target, info.Mode().Perm())
+	})
+}
+
+func copySingleFile(srcPath, dstPath string, perm os.FileMode) error {
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+
+	out, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func (h *Handler) handleDelete(accessTier string) http.HandlerFunc {

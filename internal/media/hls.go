@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,10 +39,11 @@ var (
 )
 
 type ProbeResult struct {
-	PlaybackMode    string `json:"playbackMode"`
-	VideoCodec      string `json:"videoCodec"`
-	AudioCodec      string `json:"audioCodec"`
-	FFmpegAvailable bool   `json:"ffmpegAvailable"`
+	PlaybackMode    string  `json:"playbackMode"`
+	VideoCodec      string  `json:"videoCodec"`
+	AudioCodec      string  `json:"audioCodec"`
+	FFmpegAvailable bool    `json:"ffmpegAvailable"`
+	DurationSec     float64 `json:"durationSec"`
 }
 
 func DecidePlaybackMode(ext, videoCodec, audioCodec string, ffmpegAvailable bool) string {
@@ -65,6 +68,7 @@ func ProbeMedia(ctx context.Context, realPath string) ProbeResult {
 	_, lookErr := exec.LookPath("ffmpeg")
 	ffmpegAvailable := lookErr == nil
 	var videoCodec, audioCodec string
+	var durationSec float64
 
 	if _, err := exec.LookPath("ffprobe"); err == nil {
 		probeCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
@@ -76,6 +80,7 @@ func ProbeMedia(ctx context.Context, realPath string) ProbeResult {
 			"-v", "quiet",
 			"-print_format", "json",
 			"-show_streams",
+			"-show_format",
 			realPath,
 		).Output()
 		if err == nil {
@@ -84,6 +89,9 @@ func ProbeMedia(ctx context.Context, realPath string) ProbeResult {
 					CodecType string `json:"codec_type"`
 					CodecName string `json:"codec_name"`
 				} `json:"streams"`
+				Format struct {
+					Duration string `json:"duration"`
+				} `json:"format"`
 			}
 			if json.Unmarshal(out, &parsed) == nil {
 				for _, s := range parsed.Streams {
@@ -98,6 +106,11 @@ func ProbeMedia(ctx context.Context, realPath string) ProbeResult {
 						}
 					}
 				}
+				if rawDur := strings.TrimSpace(parsed.Format.Duration); rawDur != "" {
+					if d, parseErr := strconv.ParseFloat(rawDur, 64); parseErr == nil && !math.IsNaN(d) && !math.IsInf(d, 0) && d > 0 {
+						durationSec = d
+					}
+				}
 			}
 		}
 	}
@@ -107,6 +120,7 @@ func ProbeMedia(ctx context.Context, realPath string) ProbeResult {
 		VideoCodec:      videoCodec,
 		AudioCodec:      audioCodec,
 		FFmpegAvailable: ffmpegAvailable,
+		DurationSec:     durationSec,
 	}
 }
 
@@ -130,16 +144,29 @@ func VAAPIAvailable() bool {
 	return true
 }
 
-func BuildFFmpegHLSArgs(inputPath, outDir string, useVAAPI bool) []string {
+func sanitizeStartSec(startSec float64) float64 {
+	if math.IsNaN(startSec) || math.IsInf(startSec, 0) || startSec <= 0 {
+		return 0
+	}
+	return startSec
+}
+
+func BuildFFmpegHLSArgs(inputPath, outDir string, useVAAPI bool, startSec float64) []string {
 	segPattern := filepath.Join(outDir, "seg_%04d.ts")
 	playlistPath := filepath.Join(outDir, "index.m3u8")
+	cleanStart := sanitizeStartSec(startSec)
 
 	if useVAAPI {
-		return []string{
+		args := []string{
 			"-y",
 			"-hwaccel", "vaapi",
 			"-hwaccel_device", vaapiDevicePath,
 			"-hwaccel_output_format", "vaapi",
+		}
+		if cleanStart > 0 {
+			args = append(args, "-ss", fmt.Sprintf("%.3f", cleanStart))
+		}
+		return append(args,
 			"-i", inputPath,
 			"-vf", "format=nv12|vaapi,hwupload",
 			"-c:v", "h264_vaapi",
@@ -153,11 +180,14 @@ func BuildFFmpegHLSArgs(inputPath, outDir string, useVAAPI bool) []string {
 			"-hls_flags", "independent_segments",
 			"-hls_segment_filename", segPattern,
 			playlistPath,
-		}
+		)
 	}
 
-	return []string{
-		"-y",
+	args := []string{"-y"}
+	if cleanStart > 0 {
+		args = append(args, "-ss", fmt.Sprintf("%.3f", cleanStart))
+	}
+	return append(args,
 		"-i", inputPath,
 		"-c:v", "libx264",
 		"-preset", "veryfast",
@@ -172,13 +202,14 @@ func BuildFFmpegHLSArgs(inputPath, outDir string, useVAAPI bool) []string {
 		"-hls_flags", "independent_segments",
 		"-hls_segment_filename", segPattern,
 		playlistPath,
-	}
+	)
 }
 
 type hlsSession struct {
 	id        string
 	dir       string
 	inputPath string
+	startSec  float64
 
 	mu         sync.Mutex
 	hwAccel    string
@@ -297,19 +328,21 @@ func (m *HLSManager) shutdownAll() {
 	}
 }
 
-func (m *HLSManager) StartSession(inputPath string) (string, string, error) {
+func (m *HLSManager) StartSession(inputPath string, startSec float64) (string, string, float64, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		return "", "", errors.New("호스트에서 ffmpeg를 찾을 수 없습니다")
+		return "", "", 0, errors.New("호스트에서 ffmpeg를 찾을 수 없습니다")
 	}
+
+	cleanStart := sanitizeStartSec(startSec)
 
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
-		return "", "", fmt.Errorf("generate hls session id: %w", err)
+		return "", "", 0, fmt.Errorf("generate hls session id: %w", err)
 	}
 	id := hex.EncodeToString(raw)
 	dir := filepath.Join(m.baseDir, id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", "", fmt.Errorf("create hls session dir: %w", err)
+		return "", "", 0, fmt.Errorf("create hls session dir: %w", err)
 	}
 
 	useVAAPI := VAAPIAvailable()
@@ -319,17 +352,18 @@ func (m *HLSManager) StartSession(inputPath string) (string, string, error) {
 	}
 
 	procCtx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(procCtx, "ffmpeg", BuildFFmpegHLSArgs(inputPath, dir, useVAAPI)...)
+	cmd := exec.CommandContext(procCtx, "ffmpeg", BuildFFmpegHLSArgs(inputPath, dir, useVAAPI, cleanStart)...)
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = os.RemoveAll(dir)
-		return "", "", fmt.Errorf("start ffmpeg: %w", err)
+		return "", "", 0, fmt.Errorf("start ffmpeg: %w", err)
 	}
 
 	sess := &hlsSession{
 		id:         id,
 		dir:        dir,
 		inputPath:  inputPath,
+		startSec:   cleanStart,
 		hwAccel:    hwAccel,
 		cmd:        cmd,
 		cancel:     cancel,
@@ -344,7 +378,7 @@ func (m *HLSManager) StartSession(inputPath string) (string, string, error) {
 	startedAt := time.Now()
 	go m.superviseSession(sess, procCtx, cmd, useVAAPI, startedAt)
 
-	return id, hwAccel, nil
+	return id, hwAccel, cleanStart, nil
 }
 
 func (m *HLSManager) superviseSession(sess *hlsSession, procCtx context.Context, cmd *exec.Cmd, usedVAAPI bool, startedAt time.Time) {
@@ -367,7 +401,7 @@ func (m *HLSManager) superviseSession(sess *hlsSession, procCtx context.Context,
 
 	playlistPath := filepath.Join(sess.dir, "index.m3u8")
 	if usedVAAPI && time.Since(startedAt) <= vaapiFallbackSpan && !playlistHasSegments(playlistPath) {
-		swCmd := exec.CommandContext(procCtx, "ffmpeg", BuildFFmpegHLSArgs(sess.inputPath, sess.dir, false)...)
+		swCmd := exec.CommandContext(procCtx, "ffmpeg", BuildFFmpegHLSArgs(sess.inputPath, sess.dir, false, sess.startSec)...)
 		if startErr := swCmd.Start(); startErr == nil {
 			sess.mu.Lock()
 			if sess.stopped {
@@ -426,8 +460,9 @@ func playlistHasSegments(path string) bool {
 func (h *Handler) handleHLSStart(accessTier string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			RootID  string `json:"rootId"`
-			RelPath string `json:"relPath"`
+			RootID   string  `json:"rootId"`
+			RelPath  string  `json:"relPath"`
+			StartSec float64 `json:"startSec"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			httputil.WriteError(w, http.StatusBadRequest, "잘못된 요청입니다.")
@@ -444,16 +479,17 @@ func (h *Handler) handleHLSStart(accessTier string) http.HandlerFunc {
 			return
 		}
 
-		sessionID, hwAccel, err := h.hls.StartSession(realPath)
+		sessionID, hwAccel, startSec, err := h.hls.StartSession(realPath, req.StartSec)
 		if err != nil {
 			httputil.WriteError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		httputil.WriteJSON(w, http.StatusCreated, map[string]string{
+		httputil.WriteJSON(w, http.StatusCreated, map[string]any{
 			"sessionId":   sessionID,
 			"playlistUrl": "/api/media/hls/" + sessionID + "/index.m3u8",
 			"hwAccel":     hwAccel,
+			"startSec":    startSec,
 		})
 	}
 }

@@ -872,11 +872,11 @@ function handleLogsTailChange(ev: Event): void {
                 :key="row.type"
                 class="h-9 hover:bg-[#f8fafc]"
               >
-                <td class="px-3.5 font-medium text-[#1e293b]">{{ row.type }}</td>
-                <td class="px-3.5 text-right tabular-nums text-[#475569]">{{ row.totalCount }}</td>
-                <td class="px-3.5 text-right tabular-nums text-[#475569]">{{ row.active }}</td>
-                <td class="px-3.5 text-right font-mono tabular-nums text-[#1e293b]">{{ row.size }}</td>
-                <td class="px-3.5 text-right font-mono tabular-nums text-[#0572ec]">{{ row.reclaimable }}</td>
+                <td class="whitespace-nowrap px-3.5 font-medium text-[#1e293b]">{{ row.type }}</td>
+                <td class="whitespace-nowrap px-3.5 text-right tabular-nums text-[#475569]">{{ row.totalCount }}</td>
+                <td class="whitespace-nowrap px-3.5 text-right tabular-nums text-[#475569]">{{ row.active }}</td>
+                <td class="whitespace-nowrap px-3.5 text-right font-mono tabular-nums text-[#1e293b]">{{ row.size }}</td>
+                <td class="whitespace-nowrap px-3.5 text-right font-mono tabular-nums text-[#0572ec]">{{ row.reclaimable }}</td>
               </tr>
               <tr v-if="!overview || overview.diskUsage.length === 0">
                 <td colspan="5" class="px-3.5 py-6 text-center text-[#64748b]">
@@ -893,9 +893,9 @@ function handleLogsTailChange(ev: Event): void {
       </div>
 
       <div v-else-if="activeSection === 'containers'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#dce2ea] bg-white px-4 py-2">
-          <div class="flex items-center gap-2">
-            <div class="relative">
+        <div class="flex shrink-0 flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-[#dce2ea] bg-white px-4 py-2">
+          <div class="flex shrink-0 items-center gap-2">
+            <div class="relative shrink-0">
               <Search class="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-[#94a3b8]" />
               <input
                 v-model="containerQuery"
@@ -905,10 +905,10 @@ function handleLogsTailChange(ev: Event): void {
               />
             </div>
 
-            <div class="inline-flex overflow-hidden rounded-[4px] border border-[#c6d0dc]">
+            <div class="inline-flex shrink-0 overflow-hidden rounded-[4px] border border-[#c6d0dc]">
               <button
                 type="button"
-                class="cursor-pointer px-2.5 py-1 text-[11px] font-medium transition-colors"
+                class="cursor-pointer whitespace-nowrap px-2.5 py-1 text-[11px] font-medium transition-colors"
                 :class="containerStateFilter === 'all' ? 'bg-[#0572ec] text-white' : 'bg-white text-[#475569] hover:bg-[#f4f7fa]'"
                 @click="containerStateFilter = 'all'"
               >
@@ -916,7 +916,7 @@ function handleLogsTailChange(ev: Event): void {
               </button>
               <button
                 type="button"
-                class="cursor-pointer border-l border-[#c6d0dc] px-2.5 py-1 text-[11px] font-medium transition-colors"
+                class="cursor-pointer whitespace-nowrap border-l border-[#c6d0dc] px-2.5 py-1 text-[11px] font-medium transition-colors"
                 :class="containerStateFilter === 'running' ? 'bg-[#0572ec] text-white' : 'bg-white text-[#475569] hover:bg-[#f4f7fa]'"
                 @click="containerStateFilter = 'running'"
               >
@@ -924,7 +924,7 @@ function handleLogsTailChange(ev: Event): void {
               </button>
               <button
                 type="button"
-                class="cursor-pointer border-l border-[#c6d0dc] px-2.5 py-1 text-[11px] font-medium transition-colors"
+                class="cursor-pointer whitespace-nowrap border-l border-[#c6d0dc] px-2.5 py-1 text-[11px] font-medium transition-colors"
                 :class="containerStateFilter === 'stopped' ? 'bg-[#0572ec] text-white' : 'bg-white text-[#475569] hover:bg-[#f4f7fa]'"
                 @click="containerStateFilter = 'stopped'"
               >
@@ -1140,8 +1140,8 @@ function handleLogsTailChange(ev: Event): void {
           </div>
 
           <template v-else>
-            <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#dce2ea] bg-[#f8fafc] px-3 py-2">
-              <div class="flex items-center gap-2">
+            <div class="flex shrink-0 flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-[#dce2ea] bg-[#f8fafc] px-3 py-2">
+              <div class="flex shrink-0 items-center gap-2">
                 <input
                   v-if="stackEditorMode.kind === 'create'"
                   :value="stackEditorMode.name"
@@ -1151,11 +1151,11 @@ function handleLogsTailChange(ev: Event): void {
                   @input="handleNewStackNameInput"
                 />
                 <template v-else>
-                  <span class="font-mono text-[12.5px] font-semibold text-[#1e293b]">
+                  <span class="whitespace-nowrap font-mono text-[12.5px] font-semibold text-[#1e293b]">
                     {{ stackEditorMode.name }}
                   </span>
                   <span
-                    class="rounded-[3px] border px-1.5 py-0.5 text-[10.5px] font-medium"
+                    class="whitespace-nowrap rounded-[3px] border px-1.5 py-0.5 text-[10.5px] font-medium"
                     :class="stackBadgeClass(stackEditorMode.status)"
                   >
                     {{ stackEditorMode.status }}
@@ -1163,13 +1163,13 @@ function handleLogsTailChange(ev: Event): void {
                 </template>
                 <span
                   v-if="stackDirty"
-                  class="rounded-[3px] border border-[#fcd34d] bg-[#fffbeb] px-1.5 py-0.5 text-[10.5px] font-semibold text-[#b45309]"
+                  class="whitespace-nowrap rounded-[3px] border border-[#fcd34d] bg-[#fffbeb] px-1.5 py-0.5 text-[10.5px] font-semibold text-[#b45309]"
                 >
                   수정됨
                 </span>
               </div>
 
-              <div class="flex flex-wrap items-center gap-1.5">
+              <div class="flex shrink-0 flex-nowrap items-center gap-1.5">
                 <button
                   type="button"
                   class="dsm-btn"
@@ -1269,8 +1269,8 @@ function handleLogsTailChange(ev: Event): void {
       </div>
 
       <div v-else-if="activeSection === 'images'" class="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#dce2ea] bg-white px-4 py-2">
-          <form class="flex items-center gap-2" @submit.prevent="handlePullImage">
+        <div class="flex shrink-0 flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-[#dce2ea] bg-white px-4 py-2">
+          <form class="flex shrink-0 items-center gap-2" @submit.prevent="handlePullImage">
             <input
               v-model="pullImageInput"
               type="text"
@@ -1330,18 +1330,18 @@ function handleLogsTailChange(ev: Event): void {
                 <td class="max-w-[220px] truncate px-3.5 font-mono text-[11.5px] font-medium text-[#1e293b]" :title="img.repository">
                   {{ img.repository }}
                 </td>
-                <td class="px-3.5 font-mono text-[11px] text-[#475569]">{{ img.tag }}</td>
-                <td class="px-3.5 font-mono text-[11px] text-[#64748b]">{{ img.id.slice(0, 12) }}</td>
-                <td class="px-3.5 text-right font-mono text-[11px] tabular-nums text-[#1e293b]">{{ img.size }}</td>
-                <td class="px-3.5 text-[11px] text-[#64748b]">{{ img.createdAt || '-' }}</td>
-                <td class="px-3.5">
+                <td class="whitespace-nowrap px-3.5 font-mono text-[11px] text-[#475569]">{{ img.tag }}</td>
+                <td class="whitespace-nowrap px-3.5 font-mono text-[11px] text-[#64748b]">{{ img.id.slice(0, 12) }}</td>
+                <td class="whitespace-nowrap px-3.5 text-right font-mono text-[11px] tabular-nums text-[#1e293b]">{{ img.size }}</td>
+                <td class="whitespace-nowrap px-3.5 text-[11px] text-[#64748b]">{{ img.createdAt || '-' }}</td>
+                <td class="whitespace-nowrap px-3.5">
                   <span
                     v-if="img.inUse"
-                    class="inline-flex rounded-[3px] border border-[#b8d4fe] bg-[#e6f0ff] px-1.5 py-0.5 text-[10.5px] font-medium text-[#0572ec]"
+                    class="inline-flex whitespace-nowrap rounded-[3px] border border-[#b8d4fe] bg-[#e6f0ff] px-1.5 py-0.5 text-[10.5px] font-medium text-[#0572ec]"
                   >
                     사용 중
                   </span>
-                  <span v-else class="text-[11px] text-[#94a3b8]">미사용</span>
+                  <span v-else class="whitespace-nowrap text-[11px] text-[#94a3b8]">미사용</span>
                 </td>
                 <td class="whitespace-nowrap px-3.5 text-right">
                   <template v-if="confirmDeleteKey === `image:${img.id}`">
@@ -1454,20 +1454,20 @@ function handleLogsTailChange(ev: Event): void {
             </thead>
             <tbody class="divide-y divide-[#eef2f6]">
               <tr v-for="net in networks" :key="net.id" class="h-9 hover:bg-[#f8fafc]">
-                <td class="px-3.5 font-mono text-[11.5px] font-medium text-[#1e293b]">
+                <td class="whitespace-nowrap px-3.5 font-mono text-[11.5px] font-medium text-[#1e293b]">
                   <div class="flex items-center gap-1.5">
                     <span>{{ net.name }}</span>
                     <span
                       v-if="isProtectedNetwork(net)"
-                      class="rounded-[3px] border border-[#cbd5e1] bg-[#f1f5f9] px-1.5 py-0.5 text-[10px] font-medium text-[#475569]"
+                      class="shrink-0 whitespace-nowrap rounded-[3px] border border-[#cbd5e1] bg-[#f1f5f9] px-1.5 py-0.5 text-[10px] font-medium text-[#475569]"
                     >
                       기본
                     </span>
                   </div>
                 </td>
-                <td class="px-3.5 font-mono text-[11px] text-[#64748b]">{{ net.id.slice(0, 12) }}</td>
-                <td class="px-3.5 text-[11px] text-[#475569]">{{ net.driver || '-' }}</td>
-                <td class="px-3.5 text-[11px] text-[#64748b]">{{ net.scope }}</td>
+                <td class="whitespace-nowrap px-3.5 font-mono text-[11px] text-[#64748b]">{{ net.id.slice(0, 12) }}</td>
+                <td class="whitespace-nowrap px-3.5 text-[11px] text-[#475569]">{{ net.driver || '-' }}</td>
+                <td class="whitespace-nowrap px-3.5 text-[11px] text-[#64748b]">{{ net.scope }}</td>
                 <td class="whitespace-nowrap px-3.5 text-right">
                   <template v-if="isProtectedNetwork(net)">
                     <span class="text-[11px] text-[#94a3b8]">보호됨</span>

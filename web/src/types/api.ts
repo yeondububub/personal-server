@@ -100,6 +100,7 @@ export interface HlsStartResult {
   readonly sessionId: string
   readonly playlistUrl: string
   readonly hwAccel: HlsHwAccel
+  readonly startSec: number
 }
 
 export interface ShareItem {
@@ -557,6 +558,7 @@ export function parseHlsStartResult(payload: unknown): HlsStartResult {
     sessionId,
     playlistUrl,
     hwAccel: parseHlsHwAccel(payload.hwAccel),
+    startSec: readNumber(payload, 'startSec', 0),
   }
 }
 

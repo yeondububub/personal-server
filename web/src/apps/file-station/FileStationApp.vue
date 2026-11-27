@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   Folder,
   Film,
@@ -19,7 +19,6 @@ import {
   FilePlus2,
   Settings2,
   Lock,
-  Cpu,
   X,
 } from 'lucide-vue-next'
 import { api } from '../../api/client'
@@ -27,6 +26,14 @@ import { useAuthStore } from '../../stores/auth'
 import { useDesktopStore } from '../../stores/desktop'
 import { useMountsStore } from '../../stores/mounts'
 import type { FileEntry, FileKind, MountRoot } from '../../types/api'
+import {
+  emitDsmFilesChanged,
+  hasDsmFileDragData,
+  onDsmFilesChanged,
+  readDsmFileDragData,
+  setDsmFileDragData,
+  type DsmFileDragPayload,
+} from '../../utils/fileDrag'
 import { formatBytes, formatDateTime } from '../../utils/format'
 import ShareModal from './ShareModal.vue'
 
@@ -48,7 +55,10 @@ const entries = ref<readonly FileEntry[]>([])
 const selectedRelPath = ref<string | null>(null)
 const loading = ref(false)
 const errorMessage = ref('')
-const dragOver = ref(false)
+const dragKind = ref<'none' | 'os-files' | 'dsm-entry'>('none')
+const dropTargetFolderRel = ref<string | null>(null)
+const dropTargetRootId = ref<string | null>(null)
+const movingItem = ref(false)
 
 const uploadProgress = ref<{
   readonly active: boolean
@@ -129,8 +139,22 @@ async function refreshRoots(preferredRoot?: string, preferredPath?: string): Pro
   }
 }
 
+let unsubscribeFilesChanged: (() => void) | null = null
+
 onMounted(() => {
   void refreshRoots(props.initialRootId, props.initialPath)
+  unsubscribeFilesChanged = onDsmFilesChanged(({ roots: changedRoots }) => {
+    if (currentRootId.value && changedRoots.includes(currentRootId.value)) {
+      void loadDirectory(currentRootId.value, currentRelPath.value)
+    }
+  })
+})
+
+onUnmounted(() => {
+  if (unsubscribeFilesChanged) {
+    unsubscribeFilesChanged()
+    unsubscribeFilesChanged = null
+  }
 })
 
 watch(
@@ -193,20 +217,14 @@ function openSelectedInEditor(): void {
   })
 }
 
-function launchSelectedInWargame(): void {
-  const entry = selectedEntry.value
-  if (!entry || (!entry.isDir && entry.kind !== 'archive') || !currentRootId.value) return
-  desktopStore.openWindow({
-    title: 'Wargame Runner',
-    payload: {
-      kind: 'wargame',
-      launchSource: {
-        rootId: currentRootId.value,
-        relPath: entry.relPath,
-        name: entry.name,
-        nonce: Date.now(),
-      },
-    },
+function handleEntryDragStart(ev: DragEvent, entry: FileEntry): void {
+  if (!currentRootId.value) return
+  setDsmFileDragData(ev.dataTransfer, {
+    rootId: currentRootId.value,
+    relPath: entry.relPath,
+    name: entry.name,
+    isDir: entry.isDir,
+    kind: entry.kind,
   })
 }
 
@@ -246,7 +264,7 @@ async function uploadFiles(fileList: FileList | readonly File[]): Promise<void> 
   }
 
   uploadProgress.value = { active: false, fileName: '', percent: 0 }
-  await loadDirectory(currentRootId.value, currentRelPath.value)
+  emitDsmFilesChanged([currentRootId.value])
 }
 
 function handleFileInputChange(ev: Event): void {
@@ -257,15 +275,180 @@ function handleFileInputChange(ev: Event): void {
   }
 }
 
-function handleDrop(ev: DragEvent): void {
-  dragOver.value = false
-  if (currentReadOnly.value) {
-    errorMessage.value = '읽기 전용으로 마운트된 폴더에는 업로드할 수 없습니다.'
+function parentRelOf(relPath: string): string {
+  const idx = relPath.lastIndexOf('/')
+  return idx === -1 ? '' : relPath.slice(0, idx)
+}
+
+function clearDragIndicators(): void {
+  dragKind.value = 'none'
+  dropTargetFolderRel.value = null
+  dropTargetRootId.value = null
+}
+
+async function moveDraggedEntry(
+  payload: DsmFileDragPayload,
+  toRootId: string,
+  toDirRel: string,
+): Promise<void> {
+  if (movingItem.value || !toRootId) return
+  if (payload.rootId === toRootId && parentRelOf(payload.relPath) === toDirRel) {
     return
   }
+  if (
+    payload.isDir &&
+    payload.rootId === toRootId &&
+    (toDirRel === payload.relPath || toDirRel.startsWith(`${payload.relPath}/`))
+  ) {
+    errorMessage.value = '폴더를 자기 자신의 하위 폴더로 이동할 수 없습니다.'
+    return
+  }
+
+  const targetRoot = roots.value.find((r) => r.id === toRootId)
+  if (targetRoot?.readOnly) {
+    errorMessage.value = '읽기 전용으로 마운트된 폴더로는 이동할 수 없습니다.'
+    return
+  }
+
+  movingItem.value = true
+  errorMessage.value = ''
+  try {
+    await api.moveEntry({
+      fromRootId: payload.rootId,
+      fromRel: payload.relPath,
+      toRootId,
+      toDirRel,
+    })
+    const affected =
+      payload.rootId === toRootId ? [toRootId] : [payload.rootId, toRootId]
+    emitDsmFilesChanged(affected)
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : '파일 이동에 실패했습니다.'
+  } finally {
+    movingItem.value = false
+  }
+}
+
+function handleRootDragOver(ev: DragEvent): void {
+  if (hasDsmFileDragData(ev.dataTransfer)) {
+    ev.preventDefault()
+    if (ev.dataTransfer) {
+      ev.dataTransfer.dropEffect = 'move'
+    }
+    dragKind.value = 'dsm-entry'
+    return
+  }
+  if (ev.dataTransfer?.types.includes('Files')) {
+    ev.preventDefault()
+    if (ev.dataTransfer) {
+      ev.dataTransfer.dropEffect = 'copy'
+    }
+    dragKind.value = 'os-files'
+  }
+}
+
+function handleRootDragLeave(ev: DragEvent): void {
+  if (
+    ev.currentTarget instanceof HTMLElement &&
+    ev.relatedTarget instanceof Node &&
+    ev.currentTarget.contains(ev.relatedTarget)
+  ) {
+    return
+  }
+  clearDragIndicators()
+}
+
+function handleDrop(ev: DragEvent): void {
+  const isDsmDrag = hasDsmFileDragData(ev.dataTransfer)
+  clearDragIndicators()
+
+  if (isDsmDrag) {
+    ev.preventDefault()
+    const payload = readDsmFileDragData(ev.dataTransfer)
+    if (!payload || !currentRootId.value) return
+    if (currentReadOnly.value) {
+      errorMessage.value = '읽기 전용으로 마운트된 폴더로는 이동할 수 없습니다.'
+      return
+    }
+    void moveDraggedEntry(payload, currentRootId.value, currentRelPath.value)
+    return
+  }
+
   if (ev.dataTransfer?.files && ev.dataTransfer.files.length > 0) {
+    ev.preventDefault()
+    if (currentReadOnly.value) {
+      errorMessage.value = '읽기 전용으로 마운트된 폴더에는 업로드할 수 없습니다.'
+      return
+    }
     void uploadFiles(ev.dataTransfer.files)
   }
+}
+
+function handleFolderRowDragOver(ev: DragEvent, entry: FileEntry): void {
+  if (!entry.isDir || !hasDsmFileDragData(ev.dataTransfer)) {
+    if (dropTargetFolderRel.value !== null) {
+      dropTargetFolderRel.value = null
+    }
+    return
+  }
+  ev.preventDefault()
+  ev.stopPropagation()
+  if (ev.dataTransfer) {
+    ev.dataTransfer.dropEffect = 'move'
+  }
+  dragKind.value = 'dsm-entry'
+  dropTargetFolderRel.value = entry.relPath
+  dropTargetRootId.value = null
+}
+
+function handleFolderRowDragLeave(entry: FileEntry): void {
+  if (dropTargetFolderRel.value === entry.relPath) {
+    dropTargetFolderRel.value = null
+  }
+}
+
+function handleFolderRowDrop(ev: DragEvent, entry: FileEntry): void {
+  if (!entry.isDir || !hasDsmFileDragData(ev.dataTransfer)) return
+  ev.preventDefault()
+  ev.stopPropagation()
+  const payload = readDsmFileDragData(ev.dataTransfer)
+  clearDragIndicators()
+  if (!payload || !currentRootId.value) return
+  if (currentReadOnly.value) {
+    errorMessage.value = '읽기 전용으로 마운트된 폴더로는 이동할 수 없습니다.'
+    return
+  }
+  void moveDraggedEntry(payload, currentRootId.value, entry.relPath)
+}
+
+function handleSidebarRootDragOver(ev: DragEvent, root: MountRoot): void {
+  if (!hasDsmFileDragData(ev.dataTransfer)) return
+  ev.preventDefault()
+  if (ev.dataTransfer) {
+    ev.dataTransfer.dropEffect = root.readOnly ? 'none' : 'move'
+  }
+  dragKind.value = 'dsm-entry'
+  dropTargetRootId.value = root.id
+  dropTargetFolderRel.value = null
+}
+
+function handleSidebarRootDragLeave(root: MountRoot): void {
+  if (dropTargetRootId.value === root.id) {
+    dropTargetRootId.value = null
+  }
+}
+
+function handleSidebarRootDrop(ev: DragEvent, root: MountRoot): void {
+  if (!hasDsmFileDragData(ev.dataTransfer)) return
+  ev.preventDefault()
+  const payload = readDsmFileDragData(ev.dataTransfer)
+  clearDragIndicators()
+  if (!payload) return
+  if (root.readOnly) {
+    errorMessage.value = '읽기 전용으로 마운트된 폴더로는 이동할 수 없습니다.'
+    return
+  }
+  void moveDraggedEntry(payload, root.id, '')
 }
 
 function joinRelPath(base: string, leaf: string): string {
@@ -326,7 +509,7 @@ async function submitDialog(): Promise<void> {
     }
 
     dialog.value = { kind: 'none' }
-    await loadDirectory(currentRootId.value, currentRelPath.value)
+    emitDsmFilesChanged([currentRootId.value])
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '작업 처리 실패'
   }
@@ -407,12 +590,12 @@ function iconColorForKind(kind: FileKind): string {
 <template>
   <div
     class="relative flex h-full w-full flex-col bg-white text-[12px] text-[#1e293b]"
-    @dragover.prevent="dragOver = true"
-    @dragleave.prevent="dragOver = false"
-    @drop.prevent="handleDrop"
+    @dragover="handleRootDragOver"
+    @dragleave="handleRootDragLeave"
+    @drop="handleDrop"
   >
-    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#dce2ea] bg-[#f8fafc] px-2.5 py-1.5">
-      <div class="flex flex-wrap items-center gap-1.5">
+    <div class="flex shrink-0 flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-[#dce2ea] bg-[#f8fafc] px-2.5 py-1.5">
+      <div class="flex shrink-0 flex-nowrap items-center gap-1.5">
         <input
           ref="fileInputRef"
           type="file"
@@ -491,23 +674,9 @@ function iconColorForKind(kind: FileKind): string {
           <Share2 class="h-3.5 w-3.5 text-[#475569]" />
           <span>공유 링크</span>
         </button>
-
-        <button
-          v-if="
-            authStore.accessTier === 'private' &&
-            selectedEntry &&
-            (selectedEntry.isDir || selectedEntry.kind === 'archive')
-          "
-          type="button"
-          class="dsm-btn !border-[#b8d4fe] !text-[#0572ec]"
-          @click="launchSelectedInWargame"
-        >
-          <Cpu class="h-3.5 w-3.5 text-[#0572ec]" />
-          <span>워게임 실행</span>
-        </button>
       </div>
 
-      <div class="flex items-center gap-1.5">
+      <div class="flex shrink-0 flex-nowrap items-center gap-1.5">
         <button
           v-if="!currentReadOnly"
           type="button"
@@ -550,18 +719,18 @@ function iconColorForKind(kind: FileKind): string {
         <button
           v-if="currentRootId"
           type="button"
-          class="cursor-pointer rounded-[3px] px-1.5 py-0.5 font-medium text-[#1e293b] hover:bg-[#e2e8f0]/70"
+          class="shrink-0 cursor-pointer whitespace-nowrap rounded-[3px] px-1.5 py-0.5 font-medium text-[#1e293b] hover:bg-[#e2e8f0]/70"
           @click="loadDirectory(currentRootId, '')"
         >
           {{ roots.find((r) => r.id === currentRootId)?.name ?? currentRootId }}
         </button>
-        <span v-else class="text-[#94a3b8]">공유 폴더 없음</span>
+        <span v-else class="shrink-0 whitespace-nowrap text-[#94a3b8]">공유 폴더 없음</span>
 
         <template v-for="crumb in breadcrumbs" :key="crumb.relPath">
           <ChevronRight class="h-3.5 w-3.5 shrink-0 text-[#94a3b8]" />
           <button
             type="button"
-            class="cursor-pointer rounded-[3px] px-1.5 py-0.5 text-[#334155] hover:bg-[#e2e8f0]/70"
+            class="shrink-0 cursor-pointer whitespace-nowrap rounded-[3px] px-1.5 py-0.5 text-[#334155] hover:bg-[#e2e8f0]/70"
             @click="loadDirectory(currentRootId, crumb.relPath)"
           >
             {{ crumb.name }}
@@ -581,10 +750,15 @@ function iconColorForKind(kind: FileKind): string {
             type="button"
             class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-left text-[12px] transition-colors"
             :class="
-              currentRootId === root.id
-                ? 'border-l-[3px] border-[#0572ec] bg-[#e6f0ff] font-semibold text-[#0058cc]'
-                : 'border-l-[3px] border-transparent text-[#334155] hover:bg-[#eaeff5]'
+              dropTargetRootId === root.id
+                ? 'border-l-[3px] border-[#0572ec] bg-[#dbeafe] font-semibold text-[#004eb3] ring-1 ring-inset ring-[#3b9bff]'
+                : currentRootId === root.id
+                  ? 'border-l-[3px] border-[#0572ec] bg-[#e6f0ff] font-semibold text-[#0058cc]'
+                  : 'border-l-[3px] border-transparent text-[#334155] hover:bg-[#eaeff5]'
             "
+            @dragover.stop="handleSidebarRootDragOver($event, root)"
+            @dragleave="handleSidebarRootDragLeave(root)"
+            @drop.stop="handleSidebarRootDrop($event, root)"
             @click="loadDirectory(root.id, '')"
           >
             <span class="flex min-w-0 items-center gap-2">
@@ -631,12 +805,12 @@ function iconColorForKind(kind: FileKind): string {
           {{ errorMessage }}
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto bg-white" @click.self="selectedRelPath = null">
-          <table class="w-full border-collapse bg-white text-left text-[12px]">
+        <div class="min-h-0 flex-1 overflow-auto bg-white" @click.self="selectedRelPath = null">
+          <table class="w-full table-fixed border-collapse bg-white text-left text-[12px]">
             <thead class="sticky top-0 z-10 h-8 border-b border-[#dce2ea] bg-[#f8fafc] text-[#475569]">
               <tr>
                 <th class="border-r border-[#e2e8f0] px-3 font-medium">이름</th>
-                <th class="w-28 border-r border-[#e2e8f0] px-3 font-medium">크기</th>
+                <th class="w-24 border-r border-[#e2e8f0] px-3 font-medium">크기</th>
                 <th class="hidden w-44 px-3 font-medium sm:table-cell">수정한 날짜</th>
               </tr>
             </thead>
@@ -649,33 +823,40 @@ function iconColorForKind(kind: FileKind): string {
               <tr
                 v-for="entry in entries"
                 :key="entry.relPath"
+                draggable="true"
                 class="h-[34px] cursor-pointer select-none border-b border-[#f1f5f9] transition-colors"
                 :class="
-                  selectedRelPath === entry.relPath
-                    ? 'bg-[#e6f0ff] text-[#004eb3]'
-                    : 'text-[#1e293b] hover:bg-[#f5f8fc]'
+                  dropTargetFolderRel === entry.relPath
+                    ? 'bg-[#dbeafe] text-[#004eb3] ring-1 ring-inset ring-[#3b9bff]'
+                    : selectedRelPath === entry.relPath
+                      ? 'bg-[#e6f0ff] text-[#004eb3]'
+                      : 'text-[#1e293b] hover:bg-[#f5f8fc]'
                 "
+                @dragstart="handleEntryDragStart($event, entry)"
+                @dragover="handleFolderRowDragOver($event, entry)"
+                @dragleave="handleFolderRowDragLeave(entry)"
+                @drop="handleFolderRowDrop($event, entry)"
                 @click="selectedRelPath = entry.relPath"
                 @dblclick="handleOpenEntry(entry)"
               >
                 <td class="px-3">
-                  <div class="flex items-center gap-2">
+                  <div class="flex min-w-0 items-center gap-2">
                     <component
                       :is="iconForKind(entry.kind)"
                       class="h-4 w-4 shrink-0"
                       :class="iconColorForKind(entry.kind)"
                     />
-                    <span class="truncate font-medium">{{ entry.name }}</span>
+                    <span class="truncate font-medium" :title="entry.name">{{ entry.name }}</span>
                   </div>
                 </td>
                 <td
-                  class="px-3 tabular-nums"
+                  class="whitespace-nowrap px-3 tabular-nums"
                   :class="selectedRelPath === entry.relPath ? 'text-[#004eb3]' : 'text-[#64748b]'"
                 >
                   {{ entry.isDir ? '-' : formatBytes(entry.size) }}
                 </td>
                 <td
-                  class="hidden px-3 tabular-nums sm:table-cell"
+                  class="hidden whitespace-nowrap px-3 tabular-nums sm:table-cell"
                   :class="selectedRelPath === entry.relPath ? 'text-[#004eb3]' : 'text-[#64748b]'"
                 >
                   {{ formatDateTime(entry.modTime) }}
@@ -685,18 +866,22 @@ function iconColorForKind(kind: FileKind): string {
           </table>
         </div>
 
-        <div class="flex h-7 shrink-0 items-center justify-between border-t border-[#dce2ea] bg-[#f8fafc] px-3 text-[11px] text-[#64748b]">
-          <span>총 {{ entries.length }}개 항목</span>
-          <span v-if="selectedEntry">선택됨: {{ selectedEntry.name }} (더블클릭하여 열기)</span>
+        <div class="flex h-7 shrink-0 items-center justify-between gap-3 border-t border-[#dce2ea] bg-[#f8fafc] px-3 text-[11px] text-[#64748b]">
+          <span class="shrink-0 whitespace-nowrap">총 {{ entries.length }}개 항목</span>
+          <span v-if="selectedEntry" class="truncate">선택됨: {{ selectedEntry.name }} (더블클릭하여 열기)</span>
           <span v-else>파일을 창으로 드래그하여 업로드</span>
         </div>
 
         <div
-          v-if="dragOver"
+          v-if="dragKind === 'os-files' || (dragKind === 'dsm-entry' && dropTargetFolderRel === null && dropTargetRootId === null)"
           class="pointer-events-none absolute inset-0 flex items-center justify-center border-2 border-dashed border-[#0572ec] bg-[#e6f0ff]/75"
         >
           <div class="rounded-[6px] border border-[#b8d4fe] bg-white px-4 py-2.5 text-[12.5px] font-semibold text-[#0058cc] shadow-md">
-            여기에 놓아 현재 폴더에 업로드
+            {{
+              dragKind === 'dsm-entry'
+                ? '여기에 놓아 현재 폴더로 이동'
+                : '여기에 놓아 현재 폴더에 업로드'
+            }}
           </div>
         </div>
       </div>

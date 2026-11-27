@@ -131,6 +131,9 @@ func (h *Handler) handleInfo(accessTier string) http.HandlerFunc {
 		}
 
 		probe := ProbeMedia(r.Context(), realPath)
+		if probe.DurationSec > 0 {
+			durSec = probe.DurationSec
+		}
 
 		httputil.WriteJSON(w, http.StatusOK, map[string]any{
 			"name":            st.Name(),

@@ -384,7 +384,7 @@ function statusDotClass(status: TabConnStatus): string {
 
 <template>
   <div class="flex h-full w-full flex-col overflow-hidden bg-[#12161f] text-[12px]">
-    <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#dce2ea] bg-[#f4f6f9] px-2.5 py-1.5 text-[#1e293b]">
+    <div class="flex shrink-0 flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-[#dce2ea] bg-[#f4f6f9] px-2.5 py-1.5 text-[#1e293b]">
       <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
         <div
           v-for="tab in tabs"

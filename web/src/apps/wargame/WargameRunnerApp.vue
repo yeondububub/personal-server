@@ -35,6 +35,7 @@ import type {
   WargameStatus,
   WargameTemplateKind,
 } from '../../types/api'
+import { hasDsmFileDragData, readDsmFileDragData } from '../../utils/fileDrag'
 import { formatBytes, formatDuration } from '../../utils/format'
 
 const props = defineProps<{
@@ -355,10 +356,56 @@ function handleArchiveInputChange(ev: Event): void {
 
 function handleUploadDrop(ev: DragEvent): void {
   dragOverUpload.value = false
+  if (hasDsmFileDragData(ev.dataTransfer)) {
+    return
+  }
   const firstFile = ev.dataTransfer?.files?.[0]
   if (firstFile) {
+    ev.stopPropagation()
     void prepareFromUpload(firstFile)
   }
+}
+
+const dsmDragOver = ref(false)
+
+function handleWargameDragOver(ev: DragEvent): void {
+  if (!hasDsmFileDragData(ev.dataTransfer)) return
+  ev.preventDefault()
+  if (ev.dataTransfer) {
+    ev.dataTransfer.dropEffect = 'copy'
+  }
+  dsmDragOver.value = true
+}
+
+function handleWargameDragLeave(ev: DragEvent): void {
+  if (
+    ev.currentTarget instanceof HTMLElement &&
+    ev.relatedTarget instanceof Node &&
+    ev.currentTarget.contains(ev.relatedTarget)
+  ) {
+    return
+  }
+  dsmDragOver.value = false
+}
+
+function handleWargameDrop(ev: DragEvent): void {
+  if (!hasDsmFileDragData(ev.dataTransfer)) return
+  ev.preventDefault()
+  dsmDragOver.value = false
+  dragOverUpload.value = false
+
+  const payload = readDsmFileDragData(ev.dataTransfer)
+  if (!payload) return
+  if (!payload.isDir && payload.kind !== 'archive' && !isSupportedArchiveName(payload.name)) {
+    errorMessage.value = '워게임은 폴더 또는 압축 파일(.zip, .tar.gz, .tgz 등)만 드래그하여 등록할 수 있습니다.'
+    return
+  }
+  const customName = prepareName.value.trim()
+  void prepareFromMountSource({
+    rootId: payload.rootId,
+    relPath: payload.relPath,
+    name: customName !== '' ? customName : stripArchiveSuffix(payload.name),
+  })
 }
 
 async function prepareFromMountSource(params: {
@@ -815,7 +862,21 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="relative flex h-full w-full overflow-hidden bg-[#f4f6f9] text-[12px] text-[#1e293b]">
+  <div
+    class="relative flex h-full w-full overflow-hidden bg-[#f4f6f9] text-[12px] text-[#1e293b]"
+    @dragover="handleWargameDragOver"
+    @dragleave="handleWargameDragLeave"
+    @drop="handleWargameDrop"
+  >
+    <div
+      v-if="dsmDragOver"
+      class="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-[#0572ec] bg-[#e6f0ff]/80"
+    >
+      <div class="flex items-center gap-2 rounded-[6px] border border-[#b8d4fe] bg-white px-5 py-3 text-[13px] font-semibold text-[#0058cc] shadow-lg">
+        <FolderArchive class="h-4 w-4 text-[#0572ec]" />
+        <span>여기에 놓아 새 워게임 등록</span>
+      </div>
+    </div>
     <aside class="flex w-44 shrink-0 flex-col justify-between border-r border-[#dce2ea] bg-[#f5f7fa] px-2 py-2.5">
       <div class="flex flex-col gap-1">
         <button
@@ -1030,7 +1091,7 @@ onUnmounted(() => {
           >
             <button
               type="button"
-              class="rounded-[3px] px-1.5 py-0.5 font-semibold text-[#0058cc] hover:bg-[#e6f0ff]"
+              class="shrink-0 whitespace-nowrap rounded-[3px] px-1.5 py-0.5 font-semibold text-[#0058cc] hover:bg-[#e6f0ff]"
               @click="loadMountDir(mountRootId, '')"
             >
               {{ mountRoots.find((r) => r.id === mountRootId)?.name ?? mountRootId }}
@@ -1039,7 +1100,7 @@ onUnmounted(() => {
               <ChevronRight class="h-3 w-3 shrink-0 text-[#94a3b8]" />
               <button
                 type="button"
-                class="rounded-[3px] px-1.5 py-0.5 text-[#334155] hover:bg-[#e2e8f0]"
+                class="shrink-0 whitespace-nowrap rounded-[3px] px-1.5 py-0.5 text-[#334155] hover:bg-[#e2e8f0]"
                 @click="loadMountDir(mountRootId, crumb.relPath)"
               >
                 {{ crumb.name }}
@@ -1177,24 +1238,24 @@ onUnmounted(() => {
         >
           <div class="flex flex-wrap items-start justify-between gap-2">
             <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
+              <div class="flex flex-nowrap items-center gap-2 overflow-x-auto">
                 <span class="h-2.5 w-2.5 shrink-0 rounded-full" :class="statusDotClass(inst.status)" />
                 <h4 class="truncate text-[13px] font-semibold text-[#1e293b]">{{ inst.name }}</h4>
                 <span
-                  class="inline-flex items-center gap-1 text-[11px] font-semibold"
+                  class="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] font-semibold"
                   :class="statusTextClass(inst.status)"
                 >
                   <RefreshCw v-if="inst.status === 'building'" class="h-3 w-3 animate-spin" />
                   {{ statusLabel(inst.status) }}
                 </span>
                 <span
-                  class="rounded-[3px] border border-[#dce2ea] bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-medium text-[#475569]"
+                  class="shrink-0 whitespace-nowrap rounded-[3px] border border-[#dce2ea] bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-medium text-[#475569]"
                 >
                   {{ modeLabel(inst.mode) }}
                 </span>
                 <span
                   v-if="inst.relaxSecurity"
-                  class="rounded-[3px] border border-[#fde68a] bg-[#fffbeb] px-2 py-0.5 text-[11px] font-medium text-[#92400e]"
+                  class="shrink-0 whitespace-nowrap rounded-[3px] border border-[#fde68a] bg-[#fffbeb] px-2 py-0.5 text-[11px] font-medium text-[#92400e]"
                 >
                   권한 제한 완화
                 </span>
@@ -1207,9 +1268,9 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-if="inst.status === 'running'" class="flex flex-wrap items-center gap-1.5">
+            <div v-if="inst.status === 'running'" class="flex shrink-0 flex-nowrap items-center gap-1.5">
               <span
-                class="rounded-[4px] border border-[#cbd5e1] bg-[#f1f5f9] px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums text-[#334155]"
+                class="whitespace-nowrap rounded-[4px] border border-[#cbd5e1] bg-[#f1f5f9] px-2.5 py-1 font-mono text-[11px] font-semibold tabular-nums text-[#334155]"
               >
                 TTL {{ formatDuration(remainingSeconds(inst.expiresAt)) }}
               </span>
@@ -1451,8 +1512,8 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="flex flex-wrap items-center justify-between gap-2 border-t border-[#e2e8f0] pt-2.5">
-              <div class="flex flex-wrap items-center gap-1.5">
+            <div class="flex flex-nowrap items-center justify-between gap-2 overflow-x-auto border-t border-[#e2e8f0] pt-2.5">
+              <div class="flex shrink-0 flex-nowrap items-center gap-1.5">
                 <button
                   type="button"
                   :disabled="isBusy(inst.id)"
@@ -1502,7 +1563,7 @@ onUnmounted(() => {
                 </button>
               </div>
 
-              <div class="flex flex-wrap items-center gap-1.5">
+              <div class="flex shrink-0 flex-nowrap items-center gap-1.5">
                 <button
                   v-if="inst.mode !== 'compose'"
                   type="button"

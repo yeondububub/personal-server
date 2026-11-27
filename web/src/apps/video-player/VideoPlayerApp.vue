@@ -167,6 +167,8 @@ const isPlaying = ref(false)
 const isBuffering = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
+const hlsOffsetSec = ref(0)
+const probedDurationSec = ref(0)
 const bufferedRanges = ref<readonly { readonly startPct: number; readonly widthPct: number }[]>([])
 const volume = ref(1)
 const isMuted = ref(false)
@@ -204,10 +206,12 @@ let saveTimer: ReturnType<typeof setInterval> | null = null
 let hudHideTimer: ReturnType<typeof setTimeout> | null = null
 let osdTimer: ReturnType<typeof setTimeout> | null = null
 let clickToggleTimer: ReturnType<typeof setTimeout> | null = null
+let pendingHlsSeekTimer: ReturnType<typeof setTimeout> | null = null
 let hlsInstance: Hls | null = null
 let activeHlsSessionId: string | null = null
 let isUnmounted = false
 let loadGeneration = 0
+let hlsSeekGeneration = 0
 
 const activeTrack = computed<LoadedSubtitleTrack | null>(() => {
   if (activeSubtitleId.value === null) return null
@@ -329,14 +333,14 @@ function handleStageMouseLeave(): void {
 }
 
 async function persistProgress(targetRelPath = currentRelPath.value): Promise<void> {
-  const el = videoRef.value
-  if (!el || !Number.isFinite(el.currentTime) || el.currentTime < 1) return
+  const pos = currentTime.value
+  if (!Number.isFinite(pos) || pos < 1) return
   try {
     await api.saveMediaProgress({
       rootId: props.rootId,
       relPath: targetRelPath,
-      positionSec: el.currentTime,
-      durationSec: Number.isFinite(el.duration) ? el.duration : 0,
+      positionSec: pos,
+      durationSec: Number.isFinite(duration.value) ? duration.value : 0,
     })
   } catch {
     return
@@ -344,6 +348,10 @@ async function persistProgress(targetRelPath = currentRelPath.value): Promise<vo
 }
 
 function cleanupHlsSession(): void {
+  if (pendingHlsSeekTimer) {
+    clearTimeout(pendingHlsSeekTimer)
+    pendingHlsSeekTimer = null
+  }
   if (hlsInstance !== null) {
     hlsInstance.destroy()
     hlsInstance = null
@@ -359,17 +367,28 @@ function handleBeforeUnload(): void {
   cleanupHlsSession()
 }
 
+function syncDuration(): void {
+  const el = videoRef.value
+  const elDur = el && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0
+  if (mediaInfo.value?.playbackMode === 'hls') {
+    duration.value = Math.max(probedDurationSec.value, hlsOffsetSec.value + elDur)
+    return
+  }
+  duration.value = elDur > 0 ? elDur : probedDurationSec.value
+}
+
 function updateBufferedRanges(): void {
   const el = videoRef.value
-  if (!el || !Number.isFinite(el.duration) || el.duration <= 0) {
+  const total = duration.value
+  if (!el || !Number.isFinite(total) || total <= 0) {
     bufferedRanges.value = []
     return
   }
+  const offset = mediaInfo.value?.playbackMode === 'hls' ? hlsOffsetSec.value : 0
   const out: { readonly startPct: number; readonly widthPct: number }[] = []
-  const total = el.duration
   for (let i = 0; i < el.buffered.length; i += 1) {
-    const start = el.buffered.start(i)
-    const end = el.buffered.end(i)
+    const start = offset + el.buffered.start(i)
+    const end = offset + el.buffered.end(i)
     const startPct = Math.min(100, Math.max(0, (start / total) * 100))
     const endPct = Math.min(100, Math.max(startPct, (end / total) * 100))
     out.push({ startPct, widthPct: endPct - startPct })
@@ -486,8 +505,51 @@ async function loadFolderPlaylist(relPath: string, gen: number): Promise<void> {
   }
 }
 
+async function startHlsAt(relPath: string, startSec: number, gen: number): Promise<void> {
+  const seekGen = ++hlsSeekGeneration
+  cleanupHlsSession()
+  const el = videoRef.value
+  if (el) {
+    el.pause()
+  }
+
+  const cleanStart = Math.max(0, Math.floor(startSec))
+  hlsOffsetSec.value = cleanStart
+  currentTime.value = cleanStart
+  bufferedRanges.value = []
+  playbackState.value = { kind: 'hls-preparing' }
+
+  try {
+    const started = await api.startMediaHls({
+      rootId: props.rootId,
+      relPath,
+      startSec: cleanStart,
+    })
+    if (isUnmounted || gen !== loadGeneration || seekGen !== hlsSeekGeneration) {
+      void api.stopMediaHls(started.sessionId).catch(() => undefined)
+      return
+    }
+    activeHlsSessionId = started.sessionId
+    hlsOffsetSec.value = started.startSec
+    currentTime.value = started.startSec
+    playbackState.value = {
+      kind: 'hls-ready',
+      sessionId: started.sessionId,
+      playlistUrl: started.playlistUrl,
+      hwAccel: started.hwAccel,
+    }
+    attachHlsPlayback(started.playlistUrl)
+  } catch (err) {
+    if (gen !== loadGeneration || seekGen !== hlsSeekGeneration) return
+    const msg = err instanceof Error ? err.message : 'HLS 트랜스코딩 세션을 시작하지 못했습니다.'
+    errorMessage.value = msg
+    playbackState.value = { kind: 'error', message: msg }
+  }
+}
+
 async function initPlayback(info: MediaInfo, relPath: string, gen: number): Promise<void> {
   if (info.playbackMode === 'direct') {
+    hlsOffsetSec.value = 0
     attachDirectPlayback(relPath)
     return
   }
@@ -499,27 +561,7 @@ async function initPlayback(info: MediaInfo, relPath: string, gen: number): Prom
     return
   }
 
-  playbackState.value = { kind: 'hls-preparing' }
-  try {
-    const started = await api.startMediaHls({ rootId: props.rootId, relPath })
-    if (isUnmounted || gen !== loadGeneration) {
-      void api.stopMediaHls(started.sessionId).catch(() => undefined)
-      return
-    }
-    activeHlsSessionId = started.sessionId
-    playbackState.value = {
-      kind: 'hls-ready',
-      sessionId: started.sessionId,
-      playlistUrl: started.playlistUrl,
-      hwAccel: started.hwAccel,
-    }
-    attachHlsPlayback(started.playlistUrl)
-  } catch (err) {
-    if (gen !== loadGeneration) return
-    const msg = err instanceof Error ? err.message : 'HLS 트랜스코딩 세션을 시작하지 못했습니다.'
-    errorMessage.value = msg
-    playbackState.value = { kind: 'error', message: msg }
-  }
+  await startHlsAt(relPath, 0, gen)
 }
 
 async function loadVideo(relPath: string, fileName: string, isSwitch: boolean): Promise<void> {
@@ -545,6 +587,8 @@ async function loadVideo(relPath: string, fileName: string, isSwitch: boolean): 
   errorMessage.value = ''
   currentTime.value = 0
   duration.value = 0
+  hlsOffsetSec.value = 0
+  probedDurationSec.value = 0
   bufferedRanges.value = []
   isPlaying.value = false
   isBuffering.value = false
@@ -559,6 +603,10 @@ async function loadVideo(relPath: string, fileName: string, isSwitch: boolean): 
     const info = await api.fetchMediaInfo({ rootId: props.rootId, relPath })
     if (isUnmounted || gen !== loadGeneration) return
     mediaInfo.value = info
+    if (Number.isFinite(info.durationSec) && info.durationSec > 0) {
+      probedDurationSec.value = info.durationSec
+      duration.value = info.durationSec
+    }
     if (info.positionSec >= 10 && (info.durationSec === 0 || info.positionSec < info.durationSec - 15)) {
       resumeOfferSec.value = info.positionSec
     }
@@ -610,14 +658,51 @@ function handleCenterDoubleClick(): void {
   void toggleFullscreen()
 }
 
-function seekBy(deltaSec: number): void {
+function seekToAbsolute(targetSec: number, immediateHlsRestart: boolean): void {
   const el = videoRef.value
-  if (!el) return
-  const maxTime = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : Math.max(el.currentTime + deltaSec, 0)
-  const target = Math.min(maxTime, Math.max(0, el.currentTime + deltaSec))
-  el.currentTime = target
+  const maxTime = duration.value > 0 ? duration.value : Math.max(targetSec, 0)
+  const target = Math.min(maxTime, Math.max(0, targetSec))
   currentTime.value = target
-  showOsd(deltaSec > 0 ? `+${deltaSec}초` : `${deltaSec}초`)
+
+  if (mediaInfo.value?.playbackMode !== 'hls') {
+    if (el && Number.isFinite(target)) {
+      el.currentTime = target
+    }
+    return
+  }
+
+  const localTarget = target - hlsOffsetSec.value
+  const elDur = el && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0
+  if (el && localTarget >= 0 && elDur > 0 && localTarget <= Math.max(0, elDur - 0.5)) {
+    if (pendingHlsSeekTimer) {
+      clearTimeout(pendingHlsSeekTimer)
+      pendingHlsSeekTimer = null
+    }
+    el.currentTime = localTarget
+    return
+  }
+
+  if (pendingHlsSeekTimer) {
+    clearTimeout(pendingHlsSeekTimer)
+    pendingHlsSeekTimer = null
+  }
+  const relPath = currentRelPath.value
+  const gen = loadGeneration
+  if (immediateHlsRestart) {
+    void startHlsAt(relPath, target, gen)
+    return
+  }
+  pendingHlsSeekTimer = setTimeout(() => {
+    pendingHlsSeekTimer = null
+    if (gen === loadGeneration && currentRelPath.value === relPath) {
+      void startHlsAt(relPath, currentTime.value, gen)
+    }
+  }, 250)
+}
+
+function seekBy(deltaSec: number): void {
+  const base = Number.isFinite(currentTime.value) ? currentTime.value : 0
+  seekToAbsolute(base + deltaSec, false)
   scheduleHudAutoHide()
 }
 
@@ -772,11 +857,22 @@ function handleSeekLeave(): void {
   }
 }
 
-function applySeekFromClientX(clientX: number): void {
+function applySeekFromClientX(clientX: number, commitHls: boolean): void {
   const pos = calcSeekPosition(clientX)
   hoverSeekPct.value = pos.pct
   hoverSeekTime.value = pos.sec
   currentTime.value = pos.sec
+  if (mediaInfo.value?.playbackMode === 'hls') {
+    const el = videoRef.value
+    const localTarget = pos.sec - hlsOffsetSec.value
+    const elDur = el && Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0
+    if (el && localTarget >= 0 && elDur > 0 && localTarget <= Math.max(0, elDur - 0.5)) {
+      el.currentTime = localTarget
+    } else if (commitHls) {
+      seekToAbsolute(pos.sec, true)
+    }
+    return
+  }
   if (videoRef.value && Number.isFinite(pos.sec)) {
     videoRef.value.currentTime = pos.sec
   }
@@ -786,14 +882,14 @@ function handleSeekPointerDown(ev: PointerEvent): void {
   if (ev.button !== 0) return
   ev.preventDefault()
   isScrubbing.value = true
-  applySeekFromClientX(ev.clientX)
+  applySeekFromClientX(ev.clientX, false)
   window.addEventListener('pointermove', handleSeekPointerMove)
   window.addEventListener('pointerup', handleSeekPointerUp)
 }
 
 function handleSeekPointerMove(ev: PointerEvent): void {
   if (!isScrubbing.value) return
-  applySeekFromClientX(ev.clientX)
+  applySeekFromClientX(ev.clientX, false)
 }
 
 function handleSeekPointerUp(): void {
@@ -801,6 +897,9 @@ function handleSeekPointerUp(): void {
   hoverSeekPct.value = null
   window.removeEventListener('pointermove', handleSeekPointerMove)
   window.removeEventListener('pointerup', handleSeekPointerUp)
+  if (mediaInfo.value?.playbackMode === 'hls') {
+    seekToAbsolute(currentTime.value, true)
+  }
   scheduleHudAutoHide()
 }
 
@@ -837,24 +936,27 @@ function handleFullscreenChange(): void {
 }
 
 function applyResume(): void {
-  const el = videoRef.value
-  if (!el || resumeOfferSec.value === null) return
-  el.currentTime = resumeOfferSec.value
-  currentTime.value = resumeOfferSec.value
+  if (resumeOfferSec.value === null) return
+  const target = resumeOfferSec.value
   resumeOfferSec.value = null
-  void el.play().catch(() => undefined)
+  seekToAbsolute(target, true)
+  if (mediaInfo.value?.playbackMode !== 'hls') {
+    void videoRef.value?.play().catch(() => undefined)
+  }
 }
 
 function handleVideoTimeUpdate(): void {
   const el = videoRef.value
   if (!el || isScrubbing.value) return
-  currentTime.value = Number.isFinite(el.currentTime) ? el.currentTime : 0
+  const raw = Number.isFinite(el.currentTime) ? el.currentTime : 0
+  const offset = mediaInfo.value?.playbackMode === 'hls' ? hlsOffsetSec.value : 0
+  currentTime.value = offset + raw
 }
 
 function handleVideoLoadedMetadata(): void {
   const el = videoRef.value
   if (!el) return
-  duration.value = Number.isFinite(el.duration) ? el.duration : 0
+  syncDuration()
   el.volume = volume.value
   el.muted = isMuted.value
   el.playbackRate = playbackRate.value
@@ -1336,7 +1438,7 @@ function handlePlaybackRateSelect(ev: Event): void {
             />
           </div>
 
-          <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-nowrap items-center justify-between gap-2 overflow-x-auto">
             <div class="flex items-center gap-1">
               <button
                 type="button"
@@ -1542,8 +1644,8 @@ function handlePlaybackRateSelect(ev: Event): void {
       </aside>
     </div>
 
-    <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#dce2ea] bg-[#f8fafc] px-3 py-1.5 text-[#334155]">
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
+    <div class="flex shrink-0 flex-nowrap items-center justify-between gap-2 overflow-x-auto border-t border-[#dce2ea] bg-[#f8fafc] px-3 py-1.5 text-[#334155]">
+      <div class="flex min-w-0 flex-nowrap items-center gap-2">
         <span class="max-w-[260px] truncate font-semibold text-[#1e293b]" :title="currentFileName">
           {{ currentFileName }}
         </span>

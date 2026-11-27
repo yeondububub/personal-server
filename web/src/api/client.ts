@@ -158,6 +158,19 @@ export const api = {
     })
   },
 
+  async moveEntry(params: {
+    readonly fromRootId: string
+    readonly fromRel: string
+    readonly toRootId: string
+    readonly toDirRel: string
+  }): Promise<void> {
+    await requestJSON('/api/files/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+  },
+
   async deleteEntry(params: { readonly rootId: string; readonly relPath: string }): Promise<void> {
     await requestJSON('/api/files/delete', {
       method: 'POST',
@@ -266,6 +279,7 @@ export const api = {
   async startMediaHls(params: {
     readonly rootId: string
     readonly relPath: string
+    readonly startSec?: number
   }): Promise<HlsStartResult> {
     const raw = await requestJSON('/api/media/hls/start', {
       method: 'POST',

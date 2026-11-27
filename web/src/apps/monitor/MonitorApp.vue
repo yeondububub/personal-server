@@ -329,16 +329,16 @@ const NAV_TABS: readonly { readonly id: MonitorTab; readonly label: string }[] =
       </div>
 
       <div v-else-if="activeTab === 'overview'" class="space-y-3.5">
-        <div class="flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-[#dce2ea] bg-white px-3.5 py-2.5 shadow-2xs">
-          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-[#475569]">
-            <span class="inline-flex items-center gap-1.5 font-semibold text-[#1e293b]">
+        <div class="flex flex-nowrap items-center justify-between gap-3 overflow-x-auto rounded-[6px] border border-[#dce2ea] bg-white px-3.5 py-2.5 shadow-2xs">
+          <div class="flex shrink-0 flex-nowrap items-center gap-4 text-[11.5px] text-[#475569]">
+            <span class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap font-semibold text-[#1e293b]">
               <Server class="h-3.5 w-3.5 text-[#0572ec]" />
               {{ snapshot.hostname || 'Personal Server' }}
             </span>
-            <span>{{ snapshot.platform || snapshot.os }}</span>
-            <span class="tabular-nums">{{ snapshot.cpuPerCore.length }} Cores</span>
+            <span class="whitespace-nowrap">{{ snapshot.platform || snapshot.os }}</span>
+            <span class="whitespace-nowrap tabular-nums">{{ snapshot.cpuPerCore.length }} Cores</span>
           </div>
-          <div class="inline-flex items-center gap-1.5 text-[11px] tabular-nums text-[#64748b]">
+          <div class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] tabular-nums text-[#64748b]">
             <Clock class="h-3.5 w-3.5 text-[#0572ec]" />
             가동 시간 {{ formatDuration(snapshot.uptimeSeconds) }}
           </div>

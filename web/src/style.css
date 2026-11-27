@@ -126,6 +126,10 @@ body,
 }
 
 /* Crisp desktop scrollbars */
+table th {
+  white-space: nowrap;
+}
+
 ::-webkit-scrollbar {
   width: 7px;
   height: 7px;

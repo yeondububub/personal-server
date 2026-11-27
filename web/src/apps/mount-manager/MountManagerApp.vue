@@ -283,8 +283,8 @@ onMounted(() => {
     </aside>
 
     <div class="flex min-w-0 flex-1 flex-col bg-white">
-      <div class="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-[#dce2ea] bg-[#f8fafc] px-3">
-        <div class="flex items-center gap-1.5">
+      <div class="flex h-11 shrink-0 flex-nowrap items-center justify-between gap-2 overflow-x-auto border-b border-[#dce2ea] bg-[#f8fafc] px-3">
+        <div class="flex shrink-0 flex-nowrap items-center gap-1.5">
           <button type="button" class="dsm-btn dsm-btn-primary" @click="openCreateModal">
             <Plus class="h-3.5 w-3.5" />
             생성 (마운트 연결)
@@ -365,47 +365,47 @@ onMounted(() => {
                 {{ item.hostPath }}
               </td>
 
-              <td class="px-3">
+              <td class="whitespace-nowrap px-3">
                 <span
                   v-if="item.readOnly"
-                  class="inline-flex items-center rounded-[3px] border border-[#fde68a] bg-[#fffbeb] px-1.5 py-0.5 text-[11px] font-medium text-[#92400e]"
+                  class="inline-flex items-center whitespace-nowrap rounded-[3px] border border-[#fde68a] bg-[#fffbeb] px-1.5 py-0.5 text-[11px] font-medium text-[#92400e]"
                 >
                   읽기 전용
                 </span>
                 <span
                   v-else
-                  class="inline-flex items-center rounded-[3px] border border-[#dce2ea] bg-[#f8fafc] px-1.5 py-0.5 text-[11px] font-medium text-[#334155]"
+                  class="inline-flex items-center whitespace-nowrap rounded-[3px] border border-[#dce2ea] bg-[#f8fafc] px-1.5 py-0.5 text-[11px] font-medium text-[#334155]"
                 >
                   읽기/쓰기
                 </span>
               </td>
 
-              <td class="px-3">
+              <td class="whitespace-nowrap px-3">
                 <span
                   v-if="item.privateOnly"
-                  class="inline-flex items-center rounded-[3px] border border-[#b8d4fe] bg-[#eff6ff] px-1.5 py-0.5 text-[11px] font-medium text-[#0058cc]"
+                  class="inline-flex items-center whitespace-nowrap rounded-[3px] border border-[#b8d4fe] bg-[#eff6ff] px-1.5 py-0.5 text-[11px] font-medium text-[#0058cc]"
                 >
                   Tailscale 전용
                 </span>
                 <span
                   v-else
-                  class="inline-flex items-center rounded-[3px] border border-[#dce2ea] bg-[#f8fafc] px-1.5 py-0.5 text-[11px] font-medium text-[#475569]"
+                  class="inline-flex items-center whitespace-nowrap rounded-[3px] border border-[#dce2ea] bg-[#f8fafc] px-1.5 py-0.5 text-[11px] font-medium text-[#475569]"
                 >
                   Public 허용
                 </span>
               </td>
 
-              <td class="px-3">
+              <td class="whitespace-nowrap px-3">
                 <span
                   v-if="item.exists"
-                  class="inline-flex items-center gap-1.5 font-medium text-[#059669]"
+                  class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium text-[#059669]"
                 >
                   <span class="h-2 w-2 rounded-full bg-[#10b981]" />
                   정상
                 </span>
                 <span
                   v-else
-                  class="inline-flex items-center gap-1.5 font-medium text-[#dc2626]"
+                  class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium text-[#dc2626]"
                 >
                   <span class="h-2 w-2 rounded-full bg-[#ef4444]" />
                   경로 없음
