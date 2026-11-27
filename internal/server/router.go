@@ -14,6 +14,7 @@ import (
 
 	"personal-server/internal/auth"
 	"personal-server/internal/config"
+	"personal-server/internal/docker"
 	"personal-server/internal/files"
 	"personal-server/internal/httputil"
 	"personal-server/internal/media"
@@ -35,6 +36,7 @@ type Dependencies struct {
 	Wargame  *wargame.Service
 	Monitor  *monitor.Service
 	Terminal *terminal.Handler
+	Docker   *docker.Service
 	WebDist  fs.FS
 	Started  time.Time
 }
@@ -87,12 +89,16 @@ func buildRouter(deps Dependencies, accessTier string) http.Handler {
 				if deps.Terminal != nil {
 					authed.Mount("/terminal", deps.Terminal.Routes())
 				}
+				if deps.Docker != nil {
+					authed.Mount("/docker", deps.Docker.Routes())
+				}
 				authed.Get("/private/capabilities", func(w http.ResponseWriter, _ *http.Request) {
 					httputil.WriteJSON(w, http.StatusOK, map[string]any{
 						"mountsEnabled":   true,
 						"wargameEnabled":  true,
 						"terminalEnabled": true,
-						"phase":           3,
+						"dockerEnabled":   true,
+						"phase":           4,
 					})
 				})
 			}

@@ -6,6 +6,7 @@ export type AppId =
   | 'video-player'
   | 'code-editor'
   | 'mounts'
+  | 'docker'
   | 'wargame'
   | 'terminal'
   | 'monitor'
@@ -29,6 +30,7 @@ export type WindowPayload =
   | { readonly kind: 'video-player'; readonly rootId: string; readonly relPath: string; readonly fileName: string }
   | { readonly kind: 'code-editor'; readonly rootId: string; readonly relPath: string; readonly fileName: string }
   | { readonly kind: 'mounts' }
+  | { readonly kind: 'docker' }
   | { readonly kind: 'wargame'; readonly launchSource?: WargameLaunchSource }
   | { readonly kind: 'terminal'; readonly initialTarget?: TerminalLaunchTarget }
   | { readonly kind: 'monitor' }
@@ -81,6 +83,15 @@ export const DESKTOP_APPS: readonly DesktopAppDefinition[] = [
     showOnDesktop: true,
     defaultWidth: 820,
     defaultHeight: 560,
+  },
+  {
+    id: 'docker',
+    title: 'Docker 관리',
+    subtitle: '컨테이너 · 이미지 · Compose 스택',
+    requiresPrivate: true,
+    showOnDesktop: true,
+    defaultWidth: 980,
+    defaultHeight: 640,
   },
   {
     id: 'wargame',
@@ -162,6 +173,7 @@ export const useDesktopStore = defineStore('desktop', () => {
       if (w.payload.kind !== params.payload.kind) return false
       switch (params.payload.kind) {
         case 'mounts':
+        case 'docker':
         case 'wargame':
         case 'terminal':
         case 'monitor':

@@ -2,7 +2,7 @@
 
 `filebrowser`를 대체하고 Synology DSM 스타일 웹 데스크톱 위에서 파일 탐색, 코드 편집, MP4 영상 스트리밍(자막·이어보기), 외부 공유 링크, 그리고 워게임(CTF) 자동화(Phase 2)를 통합 제공하는 개인 서버 프로젝트입니다.
 
-## 현재 구현 범위 (Phase 1 ~ Phase 3 완료)
+## 현재 구현 범위 (Phase 1 ~ Phase 4 완료)
 
 - **단일 바이너리 구조**: Vue 3(TypeScript) 프론트엔드 빌드 산출물을 Go `embed`로 단일 실행 파일에 통합
 - **Public / Private 이중 리스너 보안 분리**:
@@ -19,7 +19,10 @@
 - **미디어 트랜스코딩 & 서버 관리 (Phase 3)**:
   - `ffprobe` 코덱 분석 기반 Direct Play / 온디맨드 HLS 자동 분기, Intel VAAPI(`/dev/dri/renderD128`) 하드웨어 가속 및 `libx264` 자동 폴백, 60초 유휴 FFmpeg 자동 정리, SHA256 캐시 비디오 썸네일
   - `gopsutil` 2초 단일 수집기 + WebSocket 실시간 리소스 모니터(CPU 전체/코어별, RAM/스왑, 네트워크 RX/TX, 스토리지 볼륨 SVG 차트)
-  - `@xterm/xterm` + `creack/pty` 멀티탭 Web Terminal (호스트 로그인 쉘 및 실행 중인 워게임 컨테이너 `docker exec` 접속, Private 리스너 전용)
+  - `@xterm/xterm` + `creack/pty` 멀티탭 Web Terminal (호스트 로그인 쉘 및 실행 중인 모든 Docker/워게임 컨테이너 `docker exec` 접속, Private 리스너 전용)
+- **Docker 관리 앱 & 커스텀 영상 플레이어 (Phase 4)**:
+  - Portainer CE를 대체하는 **Docker 관리** 앱 (개요·`docker system df`, 컨테이너 시작/중지/재시작/로그/Inspect/쉘 접속, CodeMirror YAML Compose 스택 편집·배포, 이미지 Pull/Prune, 볼륨·네트워크 관리, Private 리스너 전용)
+  - 직접 제작한 커스텀 **Media Player** (`←/→` 5초/10초/30초 이동 및 OSD, `Space/K`/`↑/↓`/`F`/`P`/`[/]`/`C`/`,/.` 단축키, 로컬 `.srt`/`.smi`/`.vtt` 드래그 앤 드롭·EUC-KR 자동 디코딩·실시간 자막 싱크·스타일 설정, 같은 폴더 연속 재생 플레이리스트)
 - **File Station**:
   - 지정된 마운트 루트 디렉토리 격리 및 심볼릭 링크 탈출(`EvalSymlinks`) 차단
   - 대용량 파일 청크 업로드(드래그 앤 드롭 지원), 새 폴더/새 파일/이름 변경/삭제

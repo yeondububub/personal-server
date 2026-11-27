@@ -70,6 +70,26 @@ function sizeClass(size: 'xs' | 'sm' | 'md' | 'lg'): string {
       <path d="M45 40.5v9M40.5 45h9" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" />
     </svg>
 
+    <!-- Docker Manager: Deep-sky container ship & blocks squircle -->
+    <svg v-else-if="appId === 'docker'" viewBox="0 0 64 64" class="h-full w-full drop-shadow-sm">
+      <defs>
+        <linearGradient id="dk-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#0EA5E9" />
+          <stop offset="100%" stop-color="#0369A1" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#dk-bg)" />
+      <g fill="#FFFFFF">
+        <rect x="15" y="29" width="7" height="6" rx="1.2" />
+        <rect x="24" y="29" width="7" height="6" rx="1.2" />
+        <rect x="33" y="29" width="7" height="6" rx="1.2" />
+        <rect x="24" y="21" width="7" height="6" rx="1.2" opacity="0.92" />
+        <rect x="33" y="21" width="7" height="6" rx="1.2" opacity="0.92" />
+        <rect x="33" y="13" width="7" height="6" rx="1.2" opacity="0.82" />
+      </g>
+      <path d="M12 38h35c1.5-2 3.8-2.4 5.5-1.2-1 3.6-3.2 6.8-7.4 8.5-4.3 1.8-9.8 2.2-15.4 2.2-9.5 0-16.5-3.4-17.7-9.5z" fill="#E0F2FE" />
+    </svg>
+
     <!-- Wargame / Container Manager: Synology Container Manager stacked isometric blue blocks -->
     <svg v-else-if="appId === 'wargame'" viewBox="0 0 64 64" class="h-full w-full drop-shadow-sm">
       <defs>

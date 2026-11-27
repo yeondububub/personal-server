@@ -232,6 +232,96 @@ export interface WargameLogsResult {
   readonly status: WargameStatus
 }
 
+export interface DockerDiskUsageItem {
+  readonly type: string
+  readonly totalCount: string
+  readonly active: string
+  readonly size: string
+  readonly reclaimable: string
+}
+
+export interface DockerOverview {
+  readonly available: boolean
+  readonly error: string
+  readonly serverVersion: string
+  readonly containersRunning: number
+  readonly containersStopped: number
+  readonly imagesCount: number
+  readonly volumesCount: number
+  readonly networksCount: number
+  readonly diskUsage: readonly DockerDiskUsageItem[]
+}
+
+export interface DockerContainer {
+  readonly id: string
+  readonly name: string
+  readonly image: string
+  readonly state: string
+  readonly status: string
+  readonly ports: string
+  readonly createdAt: string
+  readonly isWargame: boolean
+  readonly cpuPercent: string
+  readonly memUsage: string
+  readonly memPercent: string
+}
+
+export interface DockerContainerMount {
+  readonly type: string
+  readonly source: string
+  readonly destination: string
+  readonly rw: boolean
+}
+
+export interface DockerContainerInspect {
+  readonly id: string
+  readonly name: string
+  readonly image: string
+  readonly state: string
+  readonly restartPolicy: string
+  readonly env: readonly string[]
+  readonly mounts: readonly DockerContainerMount[]
+  readonly networks: readonly string[]
+  readonly ports: readonly string[]
+}
+
+export interface DockerImage {
+  readonly id: string
+  readonly repository: string
+  readonly tag: string
+  readonly size: string
+  readonly createdAt: string
+  readonly inUse: boolean
+}
+
+export interface DockerStack {
+  readonly name: string
+  readonly status: string
+  readonly servicesCount: number
+  readonly runningCount: number
+  readonly updatedAt: string
+}
+
+export interface DockerStackDetail {
+  readonly name: string
+  readonly composeYaml: string
+  readonly status: string
+}
+
+export interface DockerVolume {
+  readonly name: string
+  readonly driver: string
+  readonly mountpoint: string
+  readonly createdAt: string
+}
+
+export interface DockerNetwork {
+  readonly id: string
+  readonly name: string
+  readonly driver: string
+  readonly scope: string
+}
+
 // Runtime boundary validators
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -764,4 +854,200 @@ export function parseWargameLogs(payload: unknown): WargameLogsResult {
     containerLog: readString(payload, 'containerLog'),
     status: parseWargameStatus(payload.status),
   }
+}
+
+function readStringOrNumber(obj: Record<string, unknown>, key: string, fallback = ''): string {
+  const val = obj[key]
+  if (typeof val === 'string') return val
+  if (typeof val === 'number' && Number.isFinite(val)) return String(val)
+  return fallback
+}
+
+function extractListArray(payload: unknown, wrapperKey: string): readonly unknown[] {
+  if (Array.isArray(payload)) return payload
+  if (isRecord(payload)) {
+    const wrapped = payload[wrapperKey]
+    if (Array.isArray(wrapped)) return wrapped
+  }
+  return []
+}
+
+export function parseDockerOverview(payload: unknown): DockerOverview {
+  if (!isRecord(payload)) {
+    throw new Error('Docker 개요 응답이 올바르지 않습니다.')
+  }
+  const usageRaw = Array.isArray(payload.diskUsage) ? payload.diskUsage : []
+  const diskUsage: DockerDiskUsageItem[] = []
+  for (const item of usageRaw) {
+    if (!isRecord(item)) continue
+    diskUsage.push({
+      type: readString(item, 'type'),
+      totalCount: readStringOrNumber(item, 'totalCount', readStringOrNumber(item, 'count', '0')),
+      active: readStringOrNumber(item, 'active', '0'),
+      size: readString(item, 'size', '0B'),
+      reclaimable: readString(item, 'reclaimable', '0B'),
+    })
+  }
+  return {
+    available: readBoolean(payload, 'available'),
+    error: readString(payload, 'error'),
+    serverVersion: readString(payload, 'serverVersion'),
+    containersRunning: readNumber(payload, 'containersRunning'),
+    containersStopped: readNumber(payload, 'containersStopped'),
+    imagesCount: readNumber(payload, 'imagesCount'),
+    volumesCount: readNumber(payload, 'volumesCount'),
+    networksCount: readNumber(payload, 'networksCount'),
+    diskUsage,
+  }
+}
+
+export function parseDockerContainers(payload: unknown): readonly DockerContainer[] {
+  const listRaw = extractListArray(payload, 'containers')
+  const out: DockerContainer[] = []
+  for (const item of listRaw) {
+    if (!isRecord(item)) continue
+    const id = readString(item, 'id')
+    if (id === '') continue
+    out.push({
+      id,
+      name: readString(item, 'name', id.slice(0, 12)),
+      image: readString(item, 'image'),
+      state: readString(item, 'state'),
+      status: readString(item, 'status'),
+      ports: readString(item, 'ports'),
+      createdAt: readStringOrNumber(item, 'createdAt'),
+      isWargame: readBoolean(item, 'isWargame'),
+      cpuPercent: readStringOrNumber(item, 'cpuPercent'),
+      memUsage: readString(item, 'memUsage'),
+      memPercent: readStringOrNumber(item, 'memPercent'),
+    })
+  }
+  return out
+}
+
+export function parseDockerContainerInspect(payload: unknown): DockerContainerInspect {
+  if (!isRecord(payload)) {
+    throw new Error('컨테이너 상세 정보 응답이 올바르지 않습니다.')
+  }
+  const mountsRaw = Array.isArray(payload.mounts) ? payload.mounts : []
+  const mounts: DockerContainerMount[] = []
+  for (const m of mountsRaw) {
+    if (typeof m === 'string' && m.trim() !== '') {
+      mounts.push({ type: 'bind', source: m, destination: '', rw: true })
+    } else if (isRecord(m)) {
+      mounts.push({
+        type: readString(m, 'type', 'bind'),
+        source: readString(m, 'source'),
+        destination: readString(m, 'destination'),
+        rw: readBoolean(m, 'rw', true),
+      })
+    }
+  }
+  return {
+    id: readString(payload, 'id'),
+    name: readString(payload, 'name'),
+    image: readString(payload, 'image'),
+    state: readString(payload, 'state'),
+    restartPolicy: readString(payload, 'restartPolicy'),
+    env: parseStringArray(payload.env),
+    mounts,
+    networks: parseStringArray(payload.networks),
+    ports: parseStringArray(payload.ports),
+  }
+}
+
+export function parseDockerImages(payload: unknown): readonly DockerImage[] {
+  const listRaw = extractListArray(payload, 'images')
+  const out: DockerImage[] = []
+  for (const item of listRaw) {
+    if (!isRecord(item)) continue
+    const id = readString(item, 'id')
+    if (id === '') continue
+    out.push({
+      id,
+      repository: readString(item, 'repository', '<none>'),
+      tag: readString(item, 'tag', '<none>'),
+      size: readStringOrNumber(item, 'size'),
+      createdAt: readStringOrNumber(item, 'createdAt'),
+      inUse: readBoolean(item, 'inUse'),
+    })
+  }
+  return out
+}
+
+export function parseDockerStacks(payload: unknown): readonly DockerStack[] {
+  const listRaw = extractListArray(payload, 'stacks')
+  const out: DockerStack[] = []
+  for (const item of listRaw) {
+    if (!isRecord(item)) continue
+    const name = readString(item, 'name')
+    if (name === '') continue
+    out.push({
+      name,
+      status: readString(item, 'status', 'stopped'),
+      servicesCount: readNumber(item, 'servicesCount'),
+      runningCount: readNumber(item, 'runningCount'),
+      updatedAt: readStringOrNumber(item, 'updatedAt'),
+    })
+  }
+  return out
+}
+
+export function parseDockerStackDetail(payload: unknown): DockerStackDetail {
+  if (!isRecord(payload)) {
+    throw new Error('스택 상세 정보 응답이 올바르지 않습니다.')
+  }
+  return {
+    name: readString(payload, 'name'),
+    composeYaml: readString(payload, 'composeYaml'),
+    status: readString(payload, 'status'),
+  }
+}
+
+export function parseDockerVolumes(payload: unknown): readonly DockerVolume[] {
+  const listRaw = extractListArray(payload, 'volumes')
+  const out: DockerVolume[] = []
+  for (const item of listRaw) {
+    if (!isRecord(item)) continue
+    const name = readString(item, 'name')
+    if (name === '') continue
+    out.push({
+      name,
+      driver: readString(item, 'driver', 'local'),
+      mountpoint: readString(item, 'mountpoint'),
+      createdAt: readStringOrNumber(item, 'createdAt'),
+    })
+  }
+  return out
+}
+
+export function parseDockerNetworks(payload: unknown): readonly DockerNetwork[] {
+  const listRaw = extractListArray(payload, 'networks')
+  const out: DockerNetwork[] = []
+  for (const item of listRaw) {
+    if (!isRecord(item)) continue
+    const id = readString(item, 'id')
+    const name = readString(item, 'name')
+    if (id === '' && name === '') continue
+    out.push({
+      id: id !== '' ? id : name,
+      name: name !== '' ? name : id,
+      driver: readString(item, 'driver'),
+      scope: readString(item, 'scope', 'local'),
+    })
+  }
+  return out
+}
+
+export function parseDockerTextOutput(payload: unknown): string {
+  if (typeof payload === 'string') return payload
+  if (isRecord(payload)) {
+    const logs = payload.logs
+    if (typeof logs === 'string') return logs
+    const output = payload.output
+    if (typeof output === 'string') return output
+    const message = payload.message
+    if (typeof message === 'string') return message
+  }
+  return ''
 }

@@ -12,6 +12,7 @@ server:
 storage:
   database_path: "./data/personal-server.db"
   temp_upload_dir: "./data/uploads"
+  stacks_dir: "./data/stacks"
   # File Station에 마운트할 허용 루트 디렉토리 목록
   roots:
     - id: "media"

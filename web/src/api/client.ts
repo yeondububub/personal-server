@@ -2,6 +2,15 @@ import {
   extractErrorMessage,
   parseAuthStatus,
   parseCreatedShare,
+  parseDockerContainerInspect,
+  parseDockerContainers,
+  parseDockerImages,
+  parseDockerNetworks,
+  parseDockerOverview,
+  parseDockerStackDetail,
+  parseDockerStacks,
+  parseDockerTextOutput,
+  parseDockerVolumes,
   parseFileList,
   parseHlsStartResult,
   parseHostBrowse,
@@ -20,6 +29,14 @@ import {
   parseWargameList,
   parseWargameLogs,
   type AuthStatus,
+  type DockerContainer,
+  type DockerContainerInspect,
+  type DockerImage,
+  type DockerNetwork,
+  type DockerOverview,
+  type DockerStack,
+  type DockerStackDetail,
+  type DockerVolume,
   type FileListResult,
   type HlsStartResult,
   type HostBrowseResult,
@@ -61,6 +78,26 @@ async function requestJSON(url: string, init?: RequestInit): Promise<unknown> {
     throw new Error(extractErrorMessage(body, `요청 처리 중 오류가 발생했습니다 (${res.status})`))
   }
   return body
+}
+
+async function requestTextOrJSON(url: string, init?: RequestInit): Promise<string> {
+  const res = await fetch(url, {
+    credentials: 'same-origin',
+    ...init,
+  })
+  const contentType = res.headers.get('content-type') ?? ''
+  if (contentType.includes('application/json')) {
+    const body: unknown = await res.json()
+    if (!res.ok) {
+      throw new Error(extractErrorMessage(body, `요청 처리 중 오류가 발생했습니다 (${res.status})`))
+    }
+    return parseDockerTextOutput(body)
+  }
+  const text = await res.text()
+  if (!res.ok) {
+    throw new Error(text.trim() !== '' ? text.trim() : `요청 처리 중 오류가 발생했습니다 (${res.status})`)
+  }
+  return text
 }
 
 export const api = {
@@ -477,5 +514,128 @@ export const api = {
 
   wargameSourceUrl(id: string): string {
     return `/api/wargames/${encodeURIComponent(id)}/source`
+  },
+
+  async fetchDockerOverview(): Promise<DockerOverview> {
+    const raw = await requestJSON('/api/docker/overview')
+    return parseDockerOverview(raw)
+  },
+
+  async listDockerContainers(): Promise<readonly DockerContainer[]> {
+    const raw = await requestJSON('/api/docker/containers')
+    return parseDockerContainers(raw)
+  },
+
+  async controlDockerContainer(params: {
+    readonly id: string
+    readonly action: 'start' | 'stop' | 'restart'
+  }): Promise<void> {
+    await requestJSON(`/api/docker/containers/${encodeURIComponent(params.id)}/${params.action}`, {
+      method: 'POST',
+    })
+  },
+
+  async deleteDockerContainer(params: { readonly id: string; readonly force?: boolean }): Promise<void> {
+    const qs = params.force ? '?force=1' : ''
+    await requestJSON(`/api/docker/containers/${encodeURIComponent(params.id)}${qs}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async fetchDockerContainerLogs(params: { readonly id: string; readonly tail?: number }): Promise<string> {
+    const tail = params.tail ?? 300
+    const qs = new URLSearchParams({ tail: String(tail) })
+    return requestTextOrJSON(`/api/docker/containers/${encodeURIComponent(params.id)}/logs?${qs.toString()}`)
+  },
+
+  async inspectDockerContainer(id: string): Promise<DockerContainerInspect> {
+    const raw = await requestJSON(`/api/docker/containers/${encodeURIComponent(id)}/inspect`)
+    return parseDockerContainerInspect(raw)
+  },
+
+  async listDockerImages(): Promise<readonly DockerImage[]> {
+    const raw = await requestJSON('/api/docker/images')
+    return parseDockerImages(raw)
+  },
+
+  async pullDockerImage(image: string): Promise<string> {
+    return requestTextOrJSON('/api/docker/images/pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image }),
+    })
+  },
+
+  async deleteDockerImage(params: { readonly id: string; readonly force?: boolean }): Promise<void> {
+    const qs = new URLSearchParams({ force: params.force ? '1' : '0' })
+    await requestJSON(`/api/docker/images/${encodeURIComponent(params.id)}?${qs.toString()}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async pruneDockerImages(): Promise<string> {
+    return requestTextOrJSON('/api/docker/images/prune', {
+      method: 'POST',
+    })
+  },
+
+  async listDockerStacks(): Promise<readonly DockerStack[]> {
+    const raw = await requestJSON('/api/docker/stacks')
+    return parseDockerStacks(raw)
+  },
+
+  async fetchDockerStack(name: string): Promise<DockerStackDetail> {
+    const raw = await requestJSON(`/api/docker/stacks/${encodeURIComponent(name)}`)
+    return parseDockerStackDetail(raw)
+  },
+
+  async saveDockerStack(params: { readonly name: string; readonly composeYaml: string }): Promise<void> {
+    await requestJSON(`/api/docker/stacks/${encodeURIComponent(params.name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ composeYaml: params.composeYaml }),
+    })
+  },
+
+  async controlDockerStack(params: {
+    readonly name: string
+    readonly action: 'up' | 'down' | 'recreate'
+  }): Promise<string> {
+    return requestTextOrJSON(`/api/docker/stacks/${encodeURIComponent(params.name)}/${params.action}`, {
+      method: 'POST',
+    })
+  },
+
+  async fetchDockerStackLogs(params: { readonly name: string; readonly tail?: number }): Promise<string> {
+    const qs = params.tail ? `?tail=${String(params.tail)}` : ''
+    return requestTextOrJSON(`/api/docker/stacks/${encodeURIComponent(params.name)}/logs${qs}`)
+  },
+
+  async deleteDockerStack(name: string): Promise<void> {
+    await requestJSON(`/api/docker/stacks/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async listDockerVolumes(): Promise<readonly DockerVolume[]> {
+    const raw = await requestJSON('/api/docker/volumes')
+    return parseDockerVolumes(raw)
+  },
+
+  async deleteDockerVolume(name: string): Promise<void> {
+    await requestJSON(`/api/docker/volumes/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async listDockerNetworks(): Promise<readonly DockerNetwork[]> {
+    const raw = await requestJSON('/api/docker/networks')
+    return parseDockerNetworks(raw)
+  },
+
+  async deleteDockerNetwork(id: string): Promise<void> {
+    await requestJSON(`/api/docker/networks/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
   },
 }

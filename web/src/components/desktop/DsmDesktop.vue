@@ -15,6 +15,7 @@ import FileStationApp from '../../apps/file-station/FileStationApp.vue'
 import VideoPlayerApp from '../../apps/video-player/VideoPlayerApp.vue'
 import CodeEditorApp from '../../apps/code-editor/CodeEditorApp.vue'
 import MountManagerApp from '../../apps/mount-manager/MountManagerApp.vue'
+import DockerManagerApp from '../../apps/docker-manager/DockerManagerApp.vue'
 import MonitorApp from '../../apps/monitor/MonitorApp.vue'
 import WargameRunnerApp from '../../apps/wargame/WargameRunnerApp.vue'
 import WebTerminalApp from '../../apps/terminal/WebTerminalApp.vue'
@@ -110,6 +111,9 @@ function handleLaunchApp(app: DesktopAppDefinition): void {
       return
     case 'mounts':
       desktopStore.openWindow({ title: app.title, payload: { kind: 'mounts' } })
+      return
+    case 'docker':
+      desktopStore.openWindow({ title: app.title, payload: { kind: 'docker' } })
       return
     case 'wargame':
       desktopStore.openWindow({ title: app.title, payload: { kind: 'wargame' } })
@@ -309,6 +313,7 @@ function diskUsedBytes(total: number, free: number): number {
           :file-name="win.payload.fileName"
         />
         <MountManagerApp v-else-if="win.payload.kind === 'mounts'" />
+        <DockerManagerApp v-else-if="win.payload.kind === 'docker'" />
         <MonitorApp v-else-if="win.payload.kind === 'monitor'" />
         <WargameRunnerApp
           v-else-if="win.payload.kind === 'wargame'"

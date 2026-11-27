@@ -19,6 +19,7 @@ import (
 	"personal-server/internal/auth"
 	"personal-server/internal/config"
 	"personal-server/internal/db"
+	"personal-server/internal/docker"
 	"personal-server/internal/files"
 	"personal-server/internal/media"
 	"personal-server/internal/monitor"
@@ -79,6 +80,7 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 		Storage: config.StorageConfig{
 			DatabasePath:  filepath.Join(realTmp, "test.db"),
 			TempUploadDir: uploadDir,
+			StacksDir:     filepath.Join(realTmp, "stacks"),
 			Roots: []config.MountRoot{
 				{ID: "media", Name: "Media", Path: mediaRoot},
 			},
@@ -126,6 +128,10 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 	}
 	monSvc := monitor.NewService(jail, started)
 	termH := terminal.NewHandler(wgSvc)
+	dockerSvc, err := docker.NewService(cfg.Storage.StacksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	mockWeb := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><title>DSM</title>")},
@@ -142,6 +148,7 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 		Wargame:  wgSvc,
 		Monitor:  monSvc,
 		Terminal: termH,
+		Docker:   dockerSvc,
 		WebDist:  mockWeb,
 		Started:  started,
 	}
@@ -683,5 +690,130 @@ func TestPhase3MonitorAndTerminalIsolation(t *testing.T) {
 		if monResp.StatusCode != http.StatusOK || snap.AccessTier != pair.tier || snap.CPUCores <= 0 || snap.MemTotalBytes == 0 {
 			t.Fatalf("unexpected /api/monitor/snapshot on %s: status=%d snap=%+v", pair.tier, monResp.StatusCode, snap)
 		}
+	}
+}
+
+func TestPhase4DockerIsolationAndStackCRUD(t *testing.T) {
+	rt, _ := setupTestRouters(t)
+	pubURL := "http://pub.local"
+	privURL := "http://priv.local"
+
+	privClient := newCookieClient(t, rt)
+	pubClient := newCookieClient(t, rt)
+	loginBody := `{"username":"admin","password":"testpassword123"}`
+
+	for _, pair := range []struct {
+		c   *http.Client
+		url string
+	}{{privClient, privURL}, {pubClient, pubURL}} {
+		r, err := pair.c.Post(pair.url+"/api/auth/login", "application/json", strings.NewReader(loginBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("login failed on %s: %d", pair.url, r.StatusCode)
+		}
+	}
+
+	pubDockerResp, err := pubClient.Get(pubURL + "/api/docker/overview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = pubDockerResp.Body.Close()
+	if pubDockerResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for /api/docker/overview on public listener, got %d", pubDockerResp.StatusCode)
+	}
+
+	privDockerResp, err := privClient.Get(privURL + "/api/docker/overview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ov docker.Overview
+	if err := json.NewDecoder(privDockerResp.Body).Decode(&ov); err != nil {
+		t.Fatal(err)
+	}
+	_ = privDockerResp.Body.Close()
+	if privDockerResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for /api/docker/overview on private listener, got %d", privDockerResp.StatusCode)
+	}
+
+	capResp, err := privClient.Get(privURL + "/api/private/capabilities")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var caps struct {
+		DockerEnabled bool `json:"dockerEnabled"`
+		Phase         int  `json:"phase"`
+	}
+	if err := json.NewDecoder(capResp.Body).Decode(&caps); err != nil {
+		t.Fatal(err)
+	}
+	_ = capResp.Body.Close()
+	if !caps.DockerEnabled || caps.Phase != 4 {
+		t.Fatalf("expected dockerEnabled=true phase=4, got %+v", caps)
+	}
+
+	composeYAML := "services:\n  web:\n    image: nginx:alpine\n"
+	putBody, _ := json.Marshal(map[string]string{"composeYaml": composeYAML})
+	putReq, _ := http.NewRequest(http.MethodPut, privURL+"/api/docker/stacks/demo-stack", bytes.NewReader(putBody))
+	putReq.Header.Set("Content-Type", "application/json")
+	putResp, err := privClient.Do(putReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = putResp.Body.Close()
+	if putResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on stack PUT, got %d", putResp.StatusCode)
+	}
+
+	getResp, err := privClient.Get(privURL + "/api/docker/stacks/demo-stack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stackDoc struct {
+		Name        string `json:"name"`
+		ComposeYaml string `json:"composeYaml"`
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&stackDoc); err != nil {
+		t.Fatal(err)
+	}
+	_ = getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK || stackDoc.Name != "demo-stack" || stackDoc.ComposeYaml != composeYAML {
+		t.Fatalf("unexpected stack GET response: status=%d doc=%+v", getResp.StatusCode, stackDoc)
+	}
+
+	listResp, err := privClient.Get(privURL + "/api/docker/stacks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stackList struct {
+		Stacks []docker.StackSummary `json:"stacks"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&stackList); err != nil {
+		t.Fatal(err)
+	}
+	_ = listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK || len(stackList.Stacks) != 1 || stackList.Stacks[0].Name != "demo-stack" {
+		t.Fatalf("unexpected stack list: status=%d list=%+v", listResp.StatusCode, stackList.Stacks)
+	}
+
+	delReq, _ := http.NewRequest(http.MethodDelete, privURL+"/api/docker/stacks/demo-stack", nil)
+	delResp, err := privClient.Do(delReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = delResp.Body.Close()
+	if delResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on stack DELETE, got %d", delResp.StatusCode)
+	}
+
+	afterResp, err := privClient.Get(privURL + "/api/docker/stacks/demo-stack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = afterResp.Body.Close()
+	if afterResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 after stack DELETE, got %d", afterResp.StatusCode)
 	}
 }

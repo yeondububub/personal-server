@@ -27,6 +27,7 @@ type ServerConfig struct {
 type StorageConfig struct {
 	DatabasePath  string      `yaml:"database_path"`
 	TempUploadDir string      `yaml:"temp_upload_dir"`
+	StacksDir     string      `yaml:"stacks_dir"`
 	Roots         []MountRoot `yaml:"roots"`
 }
 
@@ -63,6 +64,7 @@ func Default() Config {
 		Storage: StorageConfig{
 			DatabasePath:  "./data/personal-server.db",
 			TempUploadDir: "./data/uploads",
+			StacksDir:     "./data/stacks",
 			Roots: []MountRoot{
 				{ID: "media", Name: "Media (영상/미디어)", Path: "./data/roots/media"},
 				{ID: "workspace", Name: "Workspace (작업 폴더)", Path: "./data/roots/workspace"},
@@ -135,6 +137,17 @@ func Load(path string) (Config, error) {
 	}
 	if err := os.MkdirAll(cfg.Storage.TempUploadDir, 0o755); err != nil {
 		return Config{}, fmt.Errorf("create upload dir: %w", err)
+	}
+	if cfg.Storage.StacksDir == "" {
+		cfg.Storage.StacksDir = "./data/stacks"
+	}
+	if err := os.MkdirAll(cfg.Storage.StacksDir, 0o755); err != nil {
+		return Config{}, fmt.Errorf("create stacks dir: %w", err)
+	}
+	if stAbs, err := filepath.Abs(cfg.Storage.StacksDir); err == nil {
+		if stReal, evalErr := filepath.EvalSymlinks(stAbs); evalErr == nil {
+			cfg.Storage.StacksDir = stReal
+		}
 	}
 
 	seen := make(map[string]struct{}, len(cfg.Storage.Roots))

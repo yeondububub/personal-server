@@ -16,6 +16,7 @@ import (
 	"personal-server/internal/auth"
 	"personal-server/internal/config"
 	"personal-server/internal/db"
+	"personal-server/internal/docker"
 	"personal-server/internal/files"
 	"personal-server/internal/media"
 	"personal-server/internal/monitor"
@@ -65,6 +66,10 @@ func main() {
 	}
 	monitorSvc := monitor.NewService(jail, started)
 	terminalHandler := terminal.NewHandler(wgSvc)
+	dockerSvc, err := docker.NewService(cfg.Storage.StacksDir)
+	if err != nil {
+		log.Fatalf("init docker service: %v", err)
+	}
 
 	webFS, err := personalserver.WebDistFS()
 	if err != nil {
@@ -88,6 +93,7 @@ func main() {
 		Wargame:  wgSvc,
 		Monitor:  monitorSvc,
 		Terminal: terminalHandler,
+		Docker:   dockerSvc,
 		WebDist:  webFS,
 		Started:  started,
 	}

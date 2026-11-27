@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/go-chi/chi/v5"
@@ -20,7 +22,7 @@ import (
 	"personal-server/internal/wargame"
 )
 
-var safeContainerPattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+var safeContainerPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 type Target struct {
 	Kind  string `json:"kind"`
@@ -44,16 +46,13 @@ func (h *Handler) Routes() chi.Router {
 }
 
 func ValidateContainerName(name string) bool {
-	if !strings.HasPrefix(name, "ps-wg-") || len(name) <= len("ps-wg-") {
-		return false
-	}
-	if strings.Contains(name, "..") {
+	if len(name) < 1 || len(name) > 128 || strings.Contains(name, "..") {
 		return false
 	}
 	return safeContainerPattern.MatchString(name)
 }
 
-func (h *Handler) handleTargets(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) handleTargets(w http.ResponseWriter, r *http.Request) {
 	targets := []Target{
 		{
 			Kind:  "host",
@@ -62,8 +61,36 @@ func (h *Handler) handleTargets(w http.ResponseWriter, _ *http.Request) {
 		},
 	}
 
-	if h.wg != nil {
-		if instances, err := h.wg.ListInstances(); err == nil {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "docker", "ps", "--format", "{{.Names}}\t{{.Labels}}").Output()
+	if err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "\t", 2)
+			name := strings.TrimPrefix(strings.TrimSpace(parts[0]), "/")
+			if !ValidateContainerName(name) {
+				continue
+			}
+			labels := ""
+			if len(parts) > 1 {
+				labels = parts[1]
+			}
+			label := "컨테이너: " + name
+			if strings.Contains(labels, "personal-server.wargame.id=") {
+				label = "워게임: " + name
+			}
+			targets = append(targets, Target{
+				Kind:  "docker",
+				ID:    name,
+				Label: label,
+			})
+		}
+	} else if h.wg != nil {
+		if instances, wgErr := h.wg.ListInstances(); wgErr == nil {
 			for _, inst := range instances {
 				if inst.Status != "running" || inst.Mode == "compose" {
 					continue
