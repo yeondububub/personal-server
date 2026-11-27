@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -18,15 +19,30 @@ import (
 )
 
 type Handler struct {
-	db   *sql.DB
-	jail *files.Jail
+	db        *sql.DB
+	jail      *files.Jail
+	hls       *HLSManager
+	thumbsDir string
 }
 
-func NewHandler(conn *sql.DB, jail *files.Jail) *Handler {
-	return &Handler{
-		db:   conn,
-		jail: jail,
+func NewHandler(conn *sql.DB, jail *files.Jail, cacheDir string) *Handler {
+	if strings.TrimSpace(cacheDir) == "" {
+		cacheDir = "./data/cache"
 	}
+	hlsDir := filepath.Join(cacheDir, "hls")
+	thumbsDir := filepath.Join(cacheDir, "thumbs")
+	_ = os.MkdirAll(thumbsDir, 0o755)
+
+	return &Handler{
+		db:        conn,
+		jail:      jail,
+		hls:       NewHLSManager(hlsDir),
+		thumbsDir: thumbsDir,
+	}
+}
+
+func (h *Handler) StartBackground(ctx context.Context) {
+	h.hls.StartBackground(ctx)
 }
 
 func (h *Handler) Routes(accessTier string) chi.Router {
@@ -34,7 +50,11 @@ func (h *Handler) Routes(accessTier string) chi.Router {
 	r.Get("/info", h.handleInfo(accessTier))
 	r.Get("/stream", h.handleStream(accessTier))
 	r.Get("/subtitle", h.handleSubtitle(accessTier))
+	r.Get("/thumbnail", h.handleThumbnail(accessTier))
 	r.Put("/progress", h.handleSaveProgress(accessTier))
+	r.Post("/hls/start", h.handleHLSStart(accessTier))
+	r.Get("/hls/{sessionId}/{file}", h.handleHLSFile)
+	r.Delete("/hls/{sessionId}", h.handleHLSDelete)
 	return r
 }
 
@@ -110,14 +130,20 @@ func (h *Handler) handleInfo(accessTier string) http.HandlerFunc {
 			tracks = []SubtitleTrack{}
 		}
 
+		probe := ProbeMedia(r.Context(), realPath)
+
 		httputil.WriteJSON(w, http.StatusOK, map[string]any{
-			"name":        st.Name(),
-			"rootId":      rootID,
-			"relPath":     cleanRel,
-			"size":        st.Size(),
-			"positionSec": posSec,
-			"durationSec": durSec,
-			"subtitles":   tracks,
+			"name":            st.Name(),
+			"rootId":          rootID,
+			"relPath":         cleanRel,
+			"size":            st.Size(),
+			"positionSec":     posSec,
+			"durationSec":     durSec,
+			"subtitles":       tracks,
+			"playbackMode":    probe.PlaybackMode,
+			"videoCodec":      probe.VideoCodec,
+			"audioCodec":      probe.AudioCodec,
+			"ffmpegAvailable": probe.FFmpegAvailable,
 		})
 	}
 }

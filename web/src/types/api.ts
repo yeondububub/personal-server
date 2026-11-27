@@ -78,6 +78,10 @@ export interface SubtitleTrack {
   readonly relPath: string
 }
 
+export type MediaPlaybackMode = 'direct' | 'hls'
+
+export type HlsHwAccel = 'vaapi' | 'software'
+
 export interface MediaInfo {
   readonly name: string
   readonly rootId: string
@@ -86,6 +90,16 @@ export interface MediaInfo {
   readonly positionSec: number
   readonly durationSec: number
   readonly subtitles: readonly SubtitleTrack[]
+  readonly playbackMode: MediaPlaybackMode
+  readonly videoCodec: string
+  readonly audioCodec: string
+  readonly ffmpegAvailable: boolean
+}
+
+export interface HlsStartResult {
+  readonly sessionId: string
+  readonly playlistUrl: string
+  readonly hwAccel: HlsHwAccel
 }
 
 export interface ShareItem {
@@ -139,6 +153,32 @@ export interface SystemSummary {
   readonly uptimeSeconds: number
   readonly appMemoryBytes: number
   readonly disks: readonly DiskSummary[]
+}
+
+export interface MonitorSnapshot {
+  readonly timestamp: number
+  readonly hostname: string
+  readonly os: string
+  readonly platform: string
+  readonly cpuTotalPercent: number
+  readonly cpuPerCore: readonly number[]
+  readonly memTotalBytes: number
+  readonly memUsedBytes: number
+  readonly memUsedPercent: number
+  readonly swapTotalBytes: number
+  readonly swapUsedBytes: number
+  readonly netRxBytesPerSec: number
+  readonly netTxBytesPerSec: number
+  readonly uptimeSeconds: number
+  readonly disks: readonly DiskSummary[]
+}
+
+export type TerminalTargetKind = 'host' | 'docker'
+
+export interface TerminalTarget {
+  readonly kind: TerminalTargetKind
+  readonly id: string
+  readonly label: string
 }
 
 export interface UploadInitResult {
@@ -387,6 +427,14 @@ function parseSubtitles(raw: unknown): readonly SubtitleTrack[] {
   return out
 }
 
+function parseMediaPlaybackMode(raw: unknown): MediaPlaybackMode {
+  return raw === 'hls' ? 'hls' : 'direct'
+}
+
+function parseHlsHwAccel(raw: unknown): HlsHwAccel {
+  return raw === 'vaapi' ? 'vaapi' : 'software'
+}
+
 export function parseMediaInfo(payload: unknown): MediaInfo {
   if (!isRecord(payload)) {
     throw new Error('유효하지 않은 미디어 정보 응답입니다.')
@@ -399,6 +447,26 @@ export function parseMediaInfo(payload: unknown): MediaInfo {
     positionSec: readNumber(payload, 'positionSec'),
     durationSec: readNumber(payload, 'durationSec'),
     subtitles: parseSubtitles(payload.subtitles),
+    playbackMode: parseMediaPlaybackMode(payload.playbackMode),
+    videoCodec: readString(payload, 'videoCodec'),
+    audioCodec: readString(payload, 'audioCodec'),
+    ffmpegAvailable: readBoolean(payload, 'ffmpegAvailable'),
+  }
+}
+
+export function parseHlsStartResult(payload: unknown): HlsStartResult {
+  if (!isRecord(payload)) {
+    throw new Error('HLS 트랜스코딩 세션 응답이 올바르지 않습니다.')
+  }
+  const sessionId = readString(payload, 'sessionId')
+  const playlistUrl = readString(payload, 'playlistUrl')
+  if (sessionId === '' || playlistUrl === '') {
+    throw new Error('HLS 세션 정보가 누락되었습니다.')
+  }
+  return {
+    sessionId,
+    playlistUrl,
+    hwAccel: parseHlsHwAccel(payload.hwAccel),
   }
 }
 
@@ -467,13 +535,10 @@ export function parsePublicShare(payload: unknown): PublicShareState {
   }
 }
 
-export function parseSystemSummary(payload: unknown): SystemSummary {
-  if (!isRecord(payload)) {
-    throw new Error('시스템 요약 응답이 올바르지 않습니다.')
-  }
-  const disksRaw = Array.isArray(payload.disks) ? payload.disks : []
+function parseDiskSummaries(raw: unknown): readonly DiskSummary[] {
+  if (!Array.isArray(raw)) return []
   const disks: DiskSummary[] = []
-  for (const d of disksRaw) {
+  for (const d of raw) {
     if (!isRecord(d)) continue
     disks.push({
       id: readString(d, 'id'),
@@ -482,6 +547,24 @@ export function parseSystemSummary(payload: unknown): SystemSummary {
       freeBytes: readNumber(d, 'freeBytes'),
     })
   }
+  return disks
+}
+
+function parseNumberArray(raw: unknown): readonly number[] {
+  if (!Array.isArray(raw)) return []
+  const out: number[] = []
+  for (const item of raw) {
+    if (typeof item === 'number' && Number.isFinite(item)) {
+      out.push(item)
+    }
+  }
+  return out
+}
+
+export function parseSystemSummary(payload: unknown): SystemSummary {
+  if (!isRecord(payload)) {
+    throw new Error('시스템 요약 응답이 올바르지 않습니다.')
+  }
   return {
     accessTier: parseAccessTier(payload.accessTier),
     goOS: readString(payload, 'goOS'),
@@ -489,8 +572,50 @@ export function parseSystemSummary(payload: unknown): SystemSummary {
     cpuCores: readNumber(payload, 'cpuCores'),
     uptimeSeconds: readNumber(payload, 'uptimeSeconds'),
     appMemoryBytes: readNumber(payload, 'appMemoryBytes'),
-    disks,
+    disks: parseDiskSummaries(payload.disks),
   }
+}
+
+export function parseMonitorSnapshot(payload: unknown): MonitorSnapshot {
+  if (!isRecord(payload)) {
+    throw new Error('리소스 모니터 스냅샷 응답이 올바르지 않습니다.')
+  }
+  return {
+    timestamp: readNumber(payload, 'timestamp'),
+    hostname: readString(payload, 'hostname'),
+    os: readString(payload, 'os'),
+    platform: readString(payload, 'platform'),
+    cpuTotalPercent: readNumber(payload, 'cpuTotalPercent'),
+    cpuPerCore: parseNumberArray(payload.cpuPerCore),
+    memTotalBytes: readNumber(payload, 'memTotalBytes'),
+    memUsedBytes: readNumber(payload, 'memUsedBytes'),
+    memUsedPercent: readNumber(payload, 'memUsedPercent'),
+    swapTotalBytes: readNumber(payload, 'swapTotalBytes'),
+    swapUsedBytes: readNumber(payload, 'swapUsedBytes'),
+    netRxBytesPerSec: readNumber(payload, 'netRxBytesPerSec'),
+    netTxBytesPerSec: readNumber(payload, 'netTxBytesPerSec'),
+    uptimeSeconds: readNumber(payload, 'uptimeSeconds'),
+    disks: parseDiskSummaries(payload.disks),
+  }
+}
+
+export function parseTerminalTargets(payload: unknown): readonly TerminalTarget[] {
+  const listRaw: unknown[] = Array.isArray(payload)
+    ? payload
+    : isRecord(payload) && Array.isArray(payload.targets)
+      ? payload.targets
+      : []
+  const out: TerminalTarget[] = []
+  for (const item of listRaw) {
+    if (!isRecord(item)) continue
+    const kind: TerminalTargetKind = item.kind === 'docker' ? 'docker' : 'host'
+    const rawId = readString(item, 'id')
+    const id = rawId !== '' ? rawId : kind === 'host' ? 'host' : ''
+    if (id === '') continue
+    const label = readString(item, 'label', kind === 'host' ? '호스트 쉘' : id)
+    out.push({ kind, id, label })
+  }
+  return out
 }
 
 export function parseUploadInit(payload: unknown): UploadInitResult {

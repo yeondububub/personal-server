@@ -23,7 +23,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { api } from '../../api/client'
-import type { WargameLaunchSource } from '../../stores/desktop'
+import { useDesktopStore, type WargameLaunchSource } from '../../stores/desktop'
 import { useMountsStore } from '../../stores/mounts'
 import type {
   FileEntry,
@@ -41,6 +41,7 @@ const props = defineProps<{
   readonly launchSource?: WargameLaunchSource
 }>()
 
+const desktopStore = useDesktopStore()
 const mountsStore = useMountsStore()
 
 type NavSection = 'containers' | 'register'
@@ -673,6 +674,21 @@ function openLogs(inst: WargameInstance): void {
 function closeLogs(): void {
   stopLogsPolling()
   logsDrawer.value = { kind: 'closed' }
+}
+
+function openContainerShell(inst: WargameInstance): void {
+  desktopStore.openWindow({
+    title: '터미널',
+    payload: {
+      kind: 'terminal',
+      initialTarget: {
+        kind: 'docker',
+        container: `ps-wg-${inst.id}`,
+        label: `워게임: ${inst.name}`,
+        nonce: Date.now(),
+      },
+    },
+  })
 }
 
 function effectiveBindIp(inst: WargameInstance): string {
@@ -1487,6 +1503,16 @@ onUnmounted(() => {
               </div>
 
               <div class="flex flex-wrap items-center gap-1.5">
+                <button
+                  v-if="inst.mode !== 'compose'"
+                  type="button"
+                  class="dsm-btn"
+                  @click="openContainerShell(inst)"
+                >
+                  <Terminal class="h-3.5 w-3.5 text-[#0572ec]" />
+                  쉘 접속
+                </button>
+
                 <button type="button" class="dsm-btn" @click="openLogs(inst)">
                   <FileText class="h-3.5 w-3.5 text-[#0572ec]" />
                   로그

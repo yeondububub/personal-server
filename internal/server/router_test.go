@@ -21,9 +21,11 @@ import (
 	"personal-server/internal/db"
 	"personal-server/internal/files"
 	"personal-server/internal/media"
+	"personal-server/internal/monitor"
 	"personal-server/internal/mounts"
 	"personal-server/internal/server"
 	"personal-server/internal/share"
+	"personal-server/internal/terminal"
 	"personal-server/internal/wargame"
 )
 
@@ -111,8 +113,9 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 	if err != nil {
 		t.Fatal(err)
 	}
+	started := time.Now()
 	filesH := files.NewHandler(jail, cfg.Storage.TempUploadDir)
-	mediaH := media.NewHandler(conn, jail)
+	mediaH := media.NewHandler(conn, jail, filepath.Join(realTmp, "cache"))
 	shareH, err := share.NewHandler(conn, jail, cfg.Server.PublicBaseURL, false)
 	if err != nil {
 		t.Fatal(err)
@@ -121,22 +124,26 @@ func setupTestRouters(t *testing.T) (transport http.RoundTripper, mediaRoot stri
 	if err != nil {
 		t.Fatal(err)
 	}
+	monSvc := monitor.NewService(jail, started)
+	termH := terminal.NewHandler(wgSvc)
 
 	mockWeb := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><title>DSM</title>")},
 	}
 
 	deps := server.Dependencies{
-		Config:  cfg,
-		Auth:    authSvc,
-		Jail:    jail,
-		Files:   filesH,
-		Media:   mediaH,
-		Share:   shareH,
-		Mounts:  mountSvc,
-		Wargame: wgSvc,
-		WebDist: mockWeb,
-		Started: time.Now(),
+		Config:   cfg,
+		Auth:     authSvc,
+		Jail:     jail,
+		Files:    filesH,
+		Media:    mediaH,
+		Share:    shareH,
+		Mounts:   mountSvc,
+		Wargame:  wgSvc,
+		Monitor:  monSvc,
+		Terminal: termH,
+		WebDist:  mockWeb,
+		Started:  started,
 	}
 
 	return dualHandlerTransport{
@@ -609,5 +616,72 @@ func TestWargamePrivateOnlyPrepareDownloadAndDelete(t *testing.T) {
 	_ = uploadResp.Body.Close()
 	if uploadResp.StatusCode != http.StatusCreated || uploaded.Instance.TemplateKind != "python-flask" || uploaded.Instance.Name != "Flask Web" {
 		t.Fatalf("expected 201 python-flask from prepare/upload, got status=%d inst=%+v", uploadResp.StatusCode, uploaded.Instance)
+	}
+}
+
+func TestPhase3MonitorAndTerminalIsolation(t *testing.T) {
+	rt, _ := setupTestRouters(t)
+	pubURL := "http://pub.local"
+	privURL := "http://priv.local"
+
+	privClient := newCookieClient(t, rt)
+	pubClient := newCookieClient(t, rt)
+	loginBody := `{"username":"admin","password":"testpassword123"}`
+
+	for _, pair := range []struct {
+		c   *http.Client
+		url string
+	}{{privClient, privURL}, {pubClient, pubURL}} {
+		r, err := pair.c.Post(pair.url+"/api/auth/login", "application/json", strings.NewReader(loginBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("login failed on %s: %d", pair.url, r.StatusCode)
+		}
+	}
+
+	pubTermResp, err := pubClient.Get(pubURL + "/api/terminal/targets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = pubTermResp.Body.Close()
+	if pubTermResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for /api/terminal/targets on public listener, got %d", pubTermResp.StatusCode)
+	}
+
+	privTermResp, err := privClient.Get(privURL + "/api/terminal/targets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var termData struct {
+		Targets []terminal.Target `json:"targets"`
+	}
+	if err := json.NewDecoder(privTermResp.Body).Decode(&termData); err != nil {
+		t.Fatal(err)
+	}
+	_ = privTermResp.Body.Close()
+	if privTermResp.StatusCode != http.StatusOK || len(termData.Targets) == 0 || termData.Targets[0].Kind != "host" {
+		t.Fatalf("expected 200 with host target on private /api/terminal/targets, got status=%d targets=%+v", privTermResp.StatusCode, termData.Targets)
+	}
+
+	for _, pair := range []struct {
+		c    *http.Client
+		url  string
+		tier string
+	}{{pubClient, pubURL, "public"}, {privClient, privURL, "private"}} {
+		monResp, err := pair.c.Get(pair.url + "/api/monitor/snapshot")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var snap monitor.MonitorSnapshot
+		if err := json.NewDecoder(monResp.Body).Decode(&snap); err != nil {
+			t.Fatal(err)
+		}
+		_ = monResp.Body.Close()
+		if monResp.StatusCode != http.StatusOK || snap.AccessTier != pair.tier || snap.CPUCores <= 0 || snap.MemTotalBytes == 0 {
+			t.Fatalf("unexpected /api/monitor/snapshot on %s: status=%d snap=%+v", pair.tier, monResp.StatusCode, snap)
+		}
 	}
 }

@@ -17,13 +17,20 @@ export interface WargameLaunchSource {
   readonly nonce: number
 }
 
+export interface TerminalLaunchTarget {
+  readonly kind: 'host' | 'docker'
+  readonly container?: string
+  readonly label?: string
+  readonly nonce: number
+}
+
 export type WindowPayload =
   | { readonly kind: 'file-station'; readonly initialRootId?: string; readonly initialPath?: string }
   | { readonly kind: 'video-player'; readonly rootId: string; readonly relPath: string; readonly fileName: string }
   | { readonly kind: 'code-editor'; readonly rootId: string; readonly relPath: string; readonly fileName: string }
   | { readonly kind: 'mounts' }
   | { readonly kind: 'wargame'; readonly launchSource?: WargameLaunchSource }
-  | { readonly kind: 'terminal' }
+  | { readonly kind: 'terminal'; readonly initialTarget?: TerminalLaunchTarget }
   | { readonly kind: 'monitor' }
 
 export interface DesktopAppDefinition {
@@ -96,11 +103,11 @@ export const DESKTOP_APPS: readonly DesktopAppDefinition[] = [
   {
     id: 'monitor',
     title: '리소스 모니터',
-    subtitle: '시스템 상태 및 볼륨 용량',
+    subtitle: '실시간 CPU, 메모리, 네트워크 및 볼륨',
     requiresPrivate: false,
     showOnDesktop: true,
-    defaultWidth: 740,
-    defaultHeight: 500,
+    defaultWidth: 840,
+    defaultHeight: 560,
   },
 ]
 
@@ -182,6 +189,8 @@ export const useDesktopStore = defineStore('desktop', () => {
 
     if (existing) {
       if (params.payload.kind === 'wargame' && params.payload.launchSource) {
+        existing.payload = params.payload
+      } else if (params.payload.kind === 'terminal' && params.payload.initialTarget) {
         existing.payload = params.payload
       }
       focusWindow(existing.id)

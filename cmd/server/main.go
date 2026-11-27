@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,9 +18,11 @@ import (
 	"personal-server/internal/db"
 	"personal-server/internal/files"
 	"personal-server/internal/media"
+	"personal-server/internal/monitor"
 	"personal-server/internal/mounts"
 	"personal-server/internal/server"
 	"personal-server/internal/share"
+	"personal-server/internal/terminal"
 	"personal-server/internal/wargame"
 )
 
@@ -48,8 +51,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("init mounts service: %v", err)
 	}
+	started := time.Now()
+	cacheDir := filepath.Join(filepath.Dir(cfg.Storage.DatabasePath), "cache")
 	filesHandler := files.NewHandler(jail, cfg.Storage.TempUploadDir)
-	mediaHandler := media.NewHandler(conn, jail)
+	mediaHandler := media.NewHandler(conn, jail, cacheDir)
 	shareHandler, err := share.NewHandler(conn, jail, cfg.Server.PublicBaseURL, cfg.Server.CookieSecure)
 	if err != nil {
 		log.Fatalf("init share handler: %v", err)
@@ -58,6 +63,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("init wargame service: %v", err)
 	}
+	monitorSvc := monitor.NewService(jail, started)
+	terminalHandler := terminal.NewHandler(wgSvc)
 
 	webFS, err := personalserver.WebDistFS()
 	if err != nil {
@@ -67,18 +74,22 @@ func main() {
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	wgSvc.StartBackground(sigCtx)
+	mediaHandler.StartBackground(sigCtx)
+	monitorSvc.StartBackground(sigCtx)
 
 	deps := server.Dependencies{
-		Config:  cfg,
-		Auth:    authSvc,
-		Jail:    jail,
-		Files:   filesHandler,
-		Media:   mediaHandler,
-		Share:   shareHandler,
-		Mounts:  mountSvc,
-		Wargame: wgSvc,
-		WebDist: webFS,
-		Started: time.Now(),
+		Config:   cfg,
+		Auth:     authSvc,
+		Jail:     jail,
+		Files:    filesHandler,
+		Media:    mediaHandler,
+		Share:    shareHandler,
+		Mounts:   mountSvc,
+		Wargame:  wgSvc,
+		Monitor:  monitorSvc,
+		Terminal: terminalHandler,
+		WebDist:  webFS,
+		Started:  started,
 	}
 
 	pubSrv := &http.Server{

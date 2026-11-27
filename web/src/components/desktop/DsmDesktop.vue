@@ -5,7 +5,7 @@ import { useAuthStore } from '../../stores/auth'
 import { DESKTOP_APPS, useDesktopStore, type DesktopAppDefinition } from '../../stores/desktop'
 import { useMountsStore } from '../../stores/mounts'
 import { api } from '../../api/client'
-import type { SystemSummary } from '../../types/api'
+import type { MonitorSnapshot } from '../../types/api'
 import { formatBytes, formatDuration } from '../../utils/format'
 import DsmAppIcon from './DsmAppIcon.vue'
 import DsmTaskbar from './DsmTaskbar.vue'
@@ -17,7 +17,7 @@ import CodeEditorApp from '../../apps/code-editor/CodeEditorApp.vue'
 import MountManagerApp from '../../apps/mount-manager/MountManagerApp.vue'
 import MonitorApp from '../../apps/monitor/MonitorApp.vue'
 import WargameRunnerApp from '../../apps/wargame/WargameRunnerApp.vue'
-import PhasePreviewApp from '../../apps/placeholders/PhasePreviewApp.vue'
+import WebTerminalApp from '../../apps/terminal/WebTerminalApp.vue'
 
 const WALLPAPER_STORAGE_KEY = 'ps_dsm_wallpaper'
 
@@ -46,9 +46,9 @@ const mountsStore = useMountsStore()
 
 const wallpaperTheme = ref<DsmWallpaperTheme>(loadInitialWallpaper())
 const widgetOpen = ref(true)
-const summary = ref<SystemSummary | null>(null)
+const snapshot = ref<MonitorSnapshot | null>(null)
 const toastMessage = ref('')
-let summaryTimer: ReturnType<typeof setInterval> | null = null
+let snapshotTimer: ReturnType<typeof setInterval> | null = null
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 function handleChangeWallpaper(theme: DsmWallpaperTheme): void {
@@ -56,7 +56,7 @@ function handleChangeWallpaper(theme: DsmWallpaperTheme): void {
   try {
     localStorage.setItem(WALLPAPER_STORAGE_KEY, theme)
   } catch {
-    // Ignore storage write errors in restricted browsing contexts
+    return
   }
 }
 
@@ -72,30 +72,30 @@ function showToast(msg: string): void {
   }, 4000)
 }
 
-async function refreshSummary(): Promise<void> {
+async function refreshSnapshot(): Promise<void> {
   try {
-    summary.value = await api.fetchSystemSummary()
+    snapshot.value = await api.fetchMonitorSnapshot()
   } catch {
-    // Ignore transient widget poll failures
+    return
   }
 }
 
 onMounted(() => {
-  void refreshSummary()
-  summaryTimer = setInterval(() => {
-    void refreshSummary()
-  }, 10000)
+  void refreshSnapshot()
+  snapshotTimer = setInterval(() => {
+    void refreshSnapshot()
+  }, 4000)
 })
 
 watch(
   () => mountsStore.version,
   () => {
-    void refreshSummary()
+    void refreshSnapshot()
   },
 )
 
 onUnmounted(() => {
-  if (summaryTimer) clearInterval(summaryTimer)
+  if (snapshotTimer) clearInterval(snapshotTimer)
   if (toastTimer) clearTimeout(toastTimer)
 })
 
@@ -128,6 +128,17 @@ function handleLaunchApp(app: DesktopAppDefinition): void {
       return _exhaustive
     }
   }
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(100, Math.max(0, value))
+}
+
+function metricBarClass(percent: number, defaultClass: string): string {
+  if (percent >= 90) return 'bg-[#f43f5e]'
+  if (percent >= 75) return 'bg-[#f59e0b]'
+  return defaultClass
 }
 
 function diskUsagePercent(total: number, free: number): number {
@@ -178,7 +189,7 @@ function diskUsedBytes(total: number, free: number): number {
       </div>
 
       <aside
-        v-if="summary && widgetOpen"
+        v-if="snapshot && widgetOpen"
         class="pointer-events-auto absolute top-3.5 right-3.5 hidden w-[272px] overflow-hidden rounded-[8px] border border-white/14 bg-[#141e2b]/72 text-white shadow-xl backdrop-blur-md md:block"
       >
         <div class="border-b border-white/10 px-3.5 py-3">
@@ -198,20 +209,56 @@ function diskUsedBytes(total: number, free: number): number {
             </svg>
             <span class="text-[12.5px] font-semibold text-[#34d399]">정상 작동 중</span>
           </div>
-          <p class="mt-1 text-[11px] text-white/75">시스템이 정상입니다.</p>
           <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-white/75">
-            <span>가동 {{ formatDuration(summary.uptimeSeconds) }}</span>
+            <span>가동 {{ formatDuration(snapshot.uptimeSeconds) }}</span>
             <span>·</span>
-            <span>{{ summary.goOS }} {{ summary.cpuCores }}코어</span>
-            <span>·</span>
-            <span>메모리 {{ formatBytes(summary.appMemoryBytes) }}</span>
+            <span>{{ snapshot.os }} {{ snapshot.cpuPerCore.length }}코어</span>
+          </div>
+        </div>
+
+        <div class="space-y-2.5 border-b border-white/10 px-3.5 py-3">
+          <div class="text-[12px] font-semibold text-white/95">리소스 모니터</div>
+
+          <div>
+            <div class="mb-1 flex items-center justify-between text-[11.5px]">
+              <span class="font-medium text-white/90">CPU</span>
+              <span class="tabular-nums text-white/80">
+                {{ clampPercent(snapshot.cpuTotalPercent).toFixed(1) }}%
+              </span>
+            </div>
+            <div class="h-1.5 w-full overflow-hidden rounded-full bg-white/15">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="metricBarClass(clampPercent(snapshot.cpuTotalPercent), 'bg-[#2b88ff]')"
+                :style="{ width: `${clampPercent(snapshot.cpuTotalPercent)}%` }"
+              />
+            </div>
+          </div>
+
+          <div>
+            <div class="mb-0.5 flex items-center justify-between text-[11.5px]">
+              <span class="font-medium text-white/90">RAM</span>
+              <span class="tabular-nums text-white/80">
+                {{ clampPercent(snapshot.memUsedPercent).toFixed(1) }}%
+              </span>
+            </div>
+            <div class="mb-1 text-[10.5px] tabular-nums text-white/65">
+              {{ formatBytes(snapshot.memUsedBytes) }} / {{ formatBytes(snapshot.memTotalBytes) }}
+            </div>
+            <div class="h-1.5 w-full overflow-hidden rounded-full bg-white/15">
+              <div
+                class="h-full rounded-full transition-all duration-300"
+                :class="metricBarClass(clampPercent(snapshot.memUsedPercent), 'bg-[#14b8a6]')"
+                :style="{ width: `${clampPercent(snapshot.memUsedPercent)}%` }"
+              />
+            </div>
           </div>
         </div>
 
         <div class="px-3.5 py-3">
           <div class="mb-2.5 text-[12px] font-semibold text-white/95">스토리지</div>
           <div class="space-y-2.5">
-            <div v-for="disk in summary.disks" :key="disk.id">
+            <div v-for="disk in snapshot.disks" :key="disk.id">
               <div class="flex items-center justify-between gap-2">
                 <span class="truncate text-[11.5px] font-medium text-white/90">{{ disk.name }}</span>
                 <span class="shrink-0 text-[11px] tabular-nums text-white/75">
@@ -267,7 +314,10 @@ function diskUsedBytes(total: number, free: number): number {
           v-else-if="win.payload.kind === 'wargame'"
           :launch-source="win.payload.launchSource"
         />
-        <PhasePreviewApp v-else-if="win.payload.kind === 'terminal'" />
+        <WebTerminalApp
+          v-else-if="win.payload.kind === 'terminal'"
+          :initial-target="win.payload.initialTarget"
+        />
       </DsmWindow>
 
       <div

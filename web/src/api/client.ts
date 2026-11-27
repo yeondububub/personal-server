@@ -3,13 +3,16 @@ import {
   parseAuthStatus,
   parseCreatedShare,
   parseFileList,
+  parseHlsStartResult,
   parseHostBrowse,
   parseMediaInfo,
+  parseMonitorSnapshot,
   parseMountRoots,
   parseMountsList,
   parsePublicShare,
   parseSharesList,
   parseSystemSummary,
+  parseTerminalTargets,
   parseTextDocument,
   parseUploadInit,
   parseUploadOffset,
@@ -18,14 +21,18 @@ import {
   parseWargameLogs,
   type AuthStatus,
   type FileListResult,
+  type HlsStartResult,
   type HostBrowseResult,
   type MediaInfo,
+  type MonitorSnapshot,
   type MountInfo,
   type MountRoot,
   type PublicShareState,
   type ShareItem,
   type SharesListResult,
   type SystemSummary,
+  type TerminalTarget,
+  type TerminalTargetKind,
   type TextDocument,
   type WargameConnKind,
   type WargameInstance,
@@ -33,6 +40,12 @@ import {
   type WargameLogsResult,
   type WargameTemplateKind,
 } from '../types/api'
+
+function buildWsUrl(path: string, qs?: URLSearchParams): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const query = qs && qs.toString() !== '' ? `?${qs.toString()}` : ''
+  return `${proto}//${window.location.host}${path}${query}`
+}
 
 async function requestJSON(url: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(url, {
@@ -213,6 +226,26 @@ export const api = {
     })
   },
 
+  async startMediaHls(params: {
+    readonly rootId: string
+    readonly relPath: string
+  }): Promise<HlsStartResult> {
+    const raw = await requestJSON('/api/media/hls/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    return parseHlsStartResult(raw)
+  },
+
+  async stopMediaHls(sessionId: string): Promise<void> {
+    await fetch(`/api/media/hls/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      keepalive: true,
+    })
+  },
+
   async listShares(): Promise<SharesListResult> {
     const raw = await requestJSON('/api/shares')
     return parseSharesList(raw)
@@ -268,6 +301,37 @@ export const api = {
   async fetchSystemSummary(): Promise<SystemSummary> {
     const raw = await requestJSON('/api/system/summary')
     return parseSystemSummary(raw)
+  },
+
+  async fetchMonitorSnapshot(): Promise<MonitorSnapshot> {
+    const raw = await requestJSON('/api/monitor/snapshot')
+    return parseMonitorSnapshot(raw)
+  },
+
+  monitorWsUrl(): string {
+    return buildWsUrl('/api/monitor/ws')
+  },
+
+  async listTerminalTargets(): Promise<readonly TerminalTarget[]> {
+    const raw = await requestJSON('/api/terminal/targets')
+    return parseTerminalTargets(raw)
+  },
+
+  terminalWsUrl(params: {
+    readonly target: TerminalTargetKind
+    readonly container?: string
+    readonly cols: number
+    readonly rows: number
+  }): string {
+    const qs = new URLSearchParams({
+      target: params.target,
+      cols: String(params.cols),
+      rows: String(params.rows),
+    })
+    if (params.container && params.container !== '') {
+      qs.set('container', params.container)
+    }
+    return buildWsUrl('/api/terminal/ws', qs)
   },
 
   async listMounts(): Promise<readonly MountInfo[]> {

@@ -17,22 +17,26 @@ import (
 	"personal-server/internal/files"
 	"personal-server/internal/httputil"
 	"personal-server/internal/media"
+	"personal-server/internal/monitor"
 	"personal-server/internal/mounts"
 	"personal-server/internal/share"
+	"personal-server/internal/terminal"
 	"personal-server/internal/wargame"
 )
 
 type Dependencies struct {
-	Config  config.Config
-	Auth    *auth.Service
-	Jail    *files.Jail
-	Files   *files.Handler
-	Media   *media.Handler
-	Share   *share.Handler
-	Mounts  *mounts.Service
-	Wargame *wargame.Service
-	WebDist fs.FS
-	Started time.Time
+	Config   config.Config
+	Auth     *auth.Service
+	Jail     *files.Jail
+	Files    *files.Handler
+	Media    *media.Handler
+	Share    *share.Handler
+	Mounts   *mounts.Service
+	Wargame  *wargame.Service
+	Monitor  *monitor.Service
+	Terminal *terminal.Handler
+	WebDist  fs.FS
+	Started  time.Time
 }
 
 func NewPublicRouter(deps Dependencies) http.Handler {
@@ -68,6 +72,9 @@ func buildRouter(deps Dependencies, accessTier string) http.Handler {
 			authed.Mount("/files", deps.Files.Routes(accessTier))
 			authed.Mount("/media", deps.Media.Routes(accessTier))
 			authed.Mount("/shares", deps.Share.AdminRoutes())
+			if deps.Monitor != nil {
+				authed.Mount("/monitor", deps.Monitor.Routes(accessTier))
+			}
 			authed.Get("/system/summary", handleSystemSummary(deps, accessTier))
 
 			if accessTier == "private" {
@@ -77,12 +84,15 @@ func buildRouter(deps Dependencies, accessTier string) http.Handler {
 				if deps.Wargame != nil {
 					authed.Mount("/wargames", deps.Wargame.Routes())
 				}
+				if deps.Terminal != nil {
+					authed.Mount("/terminal", deps.Terminal.Routes())
+				}
 				authed.Get("/private/capabilities", func(w http.ResponseWriter, _ *http.Request) {
 					httputil.WriteJSON(w, http.StatusOK, map[string]any{
 						"mountsEnabled":   true,
 						"wargameEnabled":  true,
 						"terminalEnabled": true,
-						"phase":           2,
+						"phase":           3,
 					})
 				})
 			}
