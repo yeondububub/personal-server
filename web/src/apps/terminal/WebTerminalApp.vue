@@ -29,6 +29,9 @@ interface TerminalRuntime {
   ws: WebSocket | null
   resizeObserver: ResizeObserver | null
   containerEl: HTMLElement | null
+  lastSentCols: number
+  lastSentRows: number
+  resizeRafId: number | null
 }
 
 const DEFAULT_HOST_TARGET: TerminalTarget = {
@@ -77,22 +80,37 @@ async function refreshTargets(): Promise<void> {
   }
 }
 
-function sendResize(rt: TerminalRuntime): void {
+function sendResize(rt: TerminalRuntime, force = false): void {
   if (rt.ws?.readyState !== WebSocket.OPEN) return
   if (rt.term.cols <= 0 || rt.term.rows <= 0) return
+  if (!force && rt.term.cols === rt.lastSentCols && rt.term.rows === rt.lastSentRows) return
+  rt.lastSentCols = rt.term.cols
+  rt.lastSentRows = rt.term.rows
   rt.ws.send(JSON.stringify({ type: 'resize', cols: rt.term.cols, rows: rt.term.rows }))
 }
 
-function fitAndSyncSize(tabId: string): void {
+function fitAndSyncSize(tabId: string, force = false): void {
   const rt = runtimes.get(tabId)
   if (!rt || !rt.containerEl) return
   if (rt.containerEl.clientWidth <= 0 || rt.containerEl.clientHeight <= 0) return
   try {
     rt.fitAddon.fit()
-    sendResize(rt)
+    sendResize(rt, force)
   } catch {
     return
   }
+}
+
+function scheduleFitAndSyncSize(tabId: string): void {
+  const rt = runtimes.get(tabId)
+  if (!rt) return
+  if (rt.resizeRafId !== null) {
+    cancelAnimationFrame(rt.resizeRafId)
+  }
+  rt.resizeRafId = requestAnimationFrame(() => {
+    rt.resizeRafId = null
+    fitAndSyncSize(tabId)
+  })
 }
 
 function connectTabSocket(tab: TerminalTab): void {
@@ -130,7 +148,7 @@ function connectTabSocket(tab: TerminalTab): void {
       return
     }
     tab.status = 'connected'
-    fitAndSyncSize(tab.id)
+    fitAndSyncSize(tab.id, true)
     if (activeTabId.value === tab.id) {
       rt.term.focus()
     }
@@ -207,12 +225,36 @@ function createRuntime(tab: TerminalTab): TerminalRuntime {
     ws: null,
     resizeObserver: null,
     containerEl: null,
+    lastSentCols: 0,
+    lastSentRows: 0,
+    resizeRafId: null,
   }
+
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type === 'keydown' && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
+      ev.preventDefault()
+      return false
+    }
+    return true
+  })
 
   term.onData((data) => {
     if (rt.ws?.readyState === WebSocket.OPEN) {
       rt.ws.send(JSON.stringify({ type: 'input', data }))
     }
+  })
+
+  term.onBinary((data) => {
+    if (rt.ws?.readyState !== WebSocket.OPEN || data.length === 0) return
+    const bytes = new Uint8Array(data.length)
+    for (let i = 0; i < data.length; i += 1) {
+      bytes[i] = data.charCodeAt(i) & 0xff
+    }
+    let bin = ''
+    for (let i = 0; i < bytes.length; i += 1) {
+      bin += String.fromCharCode(bytes[i] ?? 0)
+    }
+    rt.ws.send(JSON.stringify({ type: 'binary', data: btoa(bin) }))
   })
 
   runtimes.set(tab.id, rt)
@@ -238,7 +280,7 @@ function bindTabContainer(tabId: string, el: Element | ComponentPublicInstance |
   rt.term.open(el)
 
   const observer = new ResizeObserver(() => {
-    fitAndSyncSize(tabId)
+    scheduleFitAndSyncSize(tabId)
   })
   observer.observe(el)
   rt.resizeObserver = observer
@@ -282,6 +324,10 @@ function openSelectedTab(): void {
 function disposeRuntime(tabId: string): void {
   const rt = runtimes.get(tabId)
   if (!rt) return
+  if (rt.resizeRafId !== null) {
+    cancelAnimationFrame(rt.resizeRafId)
+    rt.resizeRafId = null
+  }
   if (rt.resizeObserver) {
     rt.resizeObserver.disconnect()
     rt.resizeObserver = null
@@ -470,6 +516,7 @@ function statusDotClass(status: TabConnStatus): string {
         :key="tab.id"
         v-show="activeTabId === tab.id"
         class="h-full w-full p-2"
+        @mousedown="runtimes.get(tab.id)?.term.focus()"
       >
         <div
           :ref="(el) => bindTabContainer(tab.id, el)"

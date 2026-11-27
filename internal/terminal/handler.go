@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -159,6 +160,27 @@ type clientMessage struct {
 	Rows int    `json:"rows"`
 }
 
+func buildHostTerminalEnv() []string {
+	env := os.Environ()
+	hasLang := false
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "LANG=") && len(kv) > len("LANG=") {
+			hasLang = true
+			break
+		}
+	}
+	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+	if !hasLang {
+		env = append(env, "LANG=C.UTF-8")
+	}
+	return env
+}
+
+const (
+	wsPingInterval = 25 * time.Second
+	wsWriteTimeout = 10 * time.Second
+)
+
 func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 	target := strings.TrimSpace(r.URL.Query().Get("target"))
 	if target == "" {
@@ -173,7 +195,7 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 	case "host":
 		shell := resolveHostShell()
 		cmd = exec.Command(shell, "-l")
-		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+		cmd.Env = buildHostTerminalEnv()
 	case "docker":
 		if !ValidateContainerName(container) {
 			httputil.WriteError(w, http.StatusBadRequest, "유효하지 않은 컨테이너 이름입니다.")
@@ -182,8 +204,9 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 		cmd = exec.Command(
 			"docker", "exec", "-it",
 			"-e", "TERM=xterm-256color",
+			"-e", "COLORTERM=truecolor",
 			container,
-			"/bin/sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh",
+			"/bin/sh", "-c", "stty -ixon -ixoff 2>/dev/null || true; command -v bash >/dev/null 2>&1 && exec bash || exec sh",
 		)
 	default:
 		httputil.WriteError(w, http.StatusBadRequest, "지원하지 않는 터미널 대상입니다.")
@@ -201,15 +224,18 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 		return
 	}
+	disableFlowControl(ptmx)
 
 	var (
 		writeMu     sync.Mutex
 		cleanupOnce sync.Once
 		wg          sync.WaitGroup
+		stopPing    = make(chan struct{})
 	)
 
 	cleanup := func() {
 		cleanupOnce.Do(func() {
+			close(stopPing)
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
@@ -218,11 +244,33 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		_ = cmd.Wait()
 		cleanup()
+	}()
+
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopPing:
+				return
+			case <-ticker.C:
+				writeMu.Lock()
+				_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
+				err := conn.WriteMessage(websocket.PingMessage, nil)
+				_ = conn.SetWriteDeadline(time.Time{})
+				writeMu.Unlock()
+				if err != nil {
+					cleanup()
+					return
+				}
+			}
+		}
 	}()
 
 	go func() {
@@ -232,7 +280,9 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 			n, readErr := ptmx.Read(buf)
 			if n > 0 {
 				writeMu.Lock()
+				_ = conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 				wErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n])
+				_ = conn.SetWriteDeadline(time.Time{})
 				writeMu.Unlock()
 				if wErr != nil {
 					cleanup()
@@ -267,6 +317,17 @@ func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
 					cleanup()
 					wg.Wait()
 					return
+				}
+			}
+		case "binary":
+			if msg.Data != "" {
+				decoded, decErr := base64.StdEncoding.DecodeString(msg.Data)
+				if decErr == nil && len(decoded) > 0 {
+					if _, err := ptmx.Write(decoded); err != nil {
+						cleanup()
+						wg.Wait()
+						return
+					}
 				}
 			}
 		case "resize":
