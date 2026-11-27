@@ -256,35 +256,179 @@ func detectDockerfile(dockerfilePath string) (DetectResult, error) {
 	}, nil
 }
 
+func joinDockerfileLines(content string) []string {
+	rawLines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	out := make([]string, 0, len(rawLines))
+	var buf strings.Builder
+	for _, rawLine := range rawLines {
+		trimmed := strings.TrimSpace(rawLine)
+		if buf.Len() == 0 && strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasSuffix(trimmed, "\\") {
+			buf.WriteString(strings.TrimSpace(strings.TrimSuffix(trimmed, "\\")))
+			buf.WriteByte(' ')
+			continue
+		}
+		if buf.Len() > 0 {
+			buf.WriteString(trimmed)
+			out = append(out, strings.TrimSpace(buf.String()))
+			buf.Reset()
+		} else if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if buf.Len() > 0 {
+		out = append(out, strings.TrimSpace(buf.String()))
+	}
+	return out
+}
+
+func unquoteDockerfileValue(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) >= 2 {
+		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
+			return v[1 : len(v)-1]
+		}
+	}
+	return v
+}
+
+func expandDockerfileVars(input string, vars map[string]string) string {
+	var b strings.Builder
+	for i := 0; i < len(input); {
+		if input[i] != '$' {
+			b.WriteByte(input[i])
+			i++
+			continue
+		}
+		if i+1 < len(input) && input[i+1] == '{' {
+			end := strings.IndexByte(input[i+2:], '}')
+			if end != -1 {
+				expr := input[i+2 : i+2+end]
+				val := evalDockerfileVarExpr(expr, vars)
+				b.WriteString(val)
+				i += 3 + end
+				continue
+			}
+		}
+		j := i + 1
+		for j < len(input) && (input[j] == '_' || (input[j] >= 'A' && input[j] <= 'Z') || (input[j] >= 'a' && input[j] <= 'z') || (j > i+1 && input[j] >= '0' && input[j] <= '9')) {
+			j++
+		}
+		if j > i+1 {
+			name := input[i+1 : j]
+			b.WriteString(vars[name])
+			i = j
+			continue
+		}
+		b.WriteByte('$')
+		i++
+	}
+	return b.String()
+}
+
+func evalDockerfileVarExpr(expr string, vars map[string]string) string {
+	if idx := strings.Index(expr, ":-"); idx != -1 {
+		name := expr[:idx]
+		defVal := expr[idx+2:]
+		if v := vars[name]; v != "" {
+			return v
+		}
+		return expandDockerfileVars(defVal, vars)
+	}
+	if idx := strings.IndexByte(expr, '-'); idx != -1 {
+		name := expr[:idx]
+		defVal := expr[idx+1:]
+		if v, ok := vars[name]; ok {
+			return v
+		}
+		return expandDockerfileVars(defVal, vars)
+	}
+	return vars[expr]
+}
+
+func parseDockerfileArgOrEnv(instruction, rest string, vars map[string]string) {
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return
+	}
+	if strings.EqualFold(instruction, "ARG") {
+		for _, tok := range strings.Fields(rest) {
+			if eq := strings.IndexByte(tok, '='); eq != -1 {
+				key := strings.TrimSpace(tok[:eq])
+				val := expandDockerfileVars(unquoteDockerfileValue(tok[eq+1:]), vars)
+				if key != "" {
+					vars[key] = val
+				}
+			}
+		}
+		return
+	}
+
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return
+	}
+	if !strings.Contains(fields[0], "=") {
+		key := fields[0]
+		val := strings.TrimSpace(strings.TrimPrefix(rest, key))
+		vars[key] = expandDockerfileVars(unquoteDockerfileValue(val), vars)
+		return
+	}
+	for _, tok := range fields {
+		if eq := strings.IndexByte(tok, '='); eq != -1 {
+			key := strings.TrimSpace(tok[:eq])
+			val := expandDockerfileVars(unquoteDockerfileValue(tok[eq+1:]), vars)
+			if key != "" {
+				vars[key] = val
+			}
+		}
+	}
+}
+
 func parseDockerfileExpose(content string) []int {
 	seen := make(map[int]struct{})
 	out := make([]int, 0)
-	for _, rawLine := range strings.Split(content, "\n") {
-		line := strings.TrimSpace(rawLine)
+	vars := make(map[string]string)
+
+	for _, line := range joinDockerfileLines(content) {
 		if idx := strings.IndexByte(line, '#'); idx != -1 {
 			line = strings.TrimSpace(line[:idx])
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 2 || !strings.EqualFold(fields[0], "EXPOSE") {
+		if len(fields) < 2 {
 			continue
 		}
-		for _, tok := range fields[1:] {
-			proto := "tcp"
-			portStr := tok
-			if slashIdx := strings.IndexByte(tok, '/'); slashIdx != -1 {
-				portStr = tok[:slashIdx]
-				proto = strings.ToLower(tok[slashIdx+1:])
-			}
-			if proto != "tcp" {
-				continue
-			}
-			p, err := strconv.Atoi(portStr)
-			if err != nil || p <= 0 || p > 65535 {
-				continue
-			}
-			if _, dup := seen[p]; !dup {
-				seen[p] = struct{}{}
-				out = append(out, p)
+		inst := fields[0]
+		if strings.EqualFold(inst, "ARG") || strings.EqualFold(inst, "ENV") {
+			rest := strings.TrimSpace(line[len(inst):])
+			parseDockerfileArgOrEnv(inst, rest, vars)
+			continue
+		}
+		if !strings.EqualFold(inst, "EXPOSE") {
+			continue
+		}
+		for _, rawTok := range fields[1:] {
+			expanded := expandDockerfileVars(rawTok, vars)
+			for _, tok := range strings.Fields(expanded) {
+				proto := "tcp"
+				portStr := tok
+				if slashIdx := strings.IndexByte(tok, '/'); slashIdx != -1 {
+					portStr = tok[:slashIdx]
+					proto = strings.ToLower(tok[slashIdx+1:])
+				}
+				if proto != "tcp" {
+					continue
+				}
+				p, err := strconv.Atoi(portStr)
+				if err != nil || p <= 0 || p > 65535 {
+					continue
+				}
+				if _, dup := seen[p]; !dup {
+					seen[p] = struct{}{}
+					out = append(out, p)
+				}
 			}
 		}
 	}

@@ -258,6 +258,56 @@ services:
 			t.Fatalf("expected node-express:3000, got %+v", nodeRes)
 		}
 	})
+
+	t.Run("dockerfile ENV and ARG variable expansion in EXPOSE", func(t *testing.T) {
+		cases := []struct {
+			name       string
+			dockerfile string
+			wantPorts  []int
+		}{
+			{
+				name:       "ENV key=value and $PORT",
+				dockerfile: "FROM node:18\nENV PORT=3000\nEXPOSE $PORT\n",
+				wantPorts:  []int{3000},
+			},
+			{
+				name:       "ENV legacy syntax and ${PORT}/tcp",
+				dockerfile: "FROM node:18\nENV PORT 3000\nEXPOSE ${PORT}/tcp\n",
+				wantPorts:  []int{3000},
+			},
+			{
+				name:       "ARG into ENV and multiline",
+				dockerfile: "FROM alpine\nARG APP_PORT=\"4000\"\nENV HOST=0.0.0.0 \\\n    PORT=$APP_PORT\nEXPOSE ${PORT:-8000}\n",
+				wantPorts:  []int{4000},
+			},
+			{
+				name:       "default fallback syntax when unset",
+				dockerfile: "FROM alpine\nEXPOSE ${UNSET_PORT:-3000}\n",
+				wantPorts:  []int{3000},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(tc.dockerfile), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				res, err := Detect(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if res.Mode != "dockerfile" || len(res.Ports) != len(tc.wantPorts) {
+					t.Fatalf("unexpected detect result: %+v", res)
+				}
+				for i, want := range tc.wantPorts {
+					if res.Ports[i].ContainerPort != want {
+						t.Fatalf("port[%d] = %d, want %d", i, res.Ports[i].ContainerPort, want)
+					}
+				}
+			})
+		}
+	})
 }
 
 func TestSanitizeComposeStripsHostEscapesAndRewritesPorts(t *testing.T) {
