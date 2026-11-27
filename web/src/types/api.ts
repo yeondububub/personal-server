@@ -80,7 +80,7 @@ export interface SubtitleTrack {
 
 export type MediaPlaybackMode = 'direct' | 'hls'
 
-export type HlsHwAccel = 'vaapi' | 'software'
+export type HlsHwAccel = 'vaapi' | 'software' | 'copy'
 
 export interface MediaInfo {
   readonly name: string
@@ -523,7 +523,8 @@ function parseMediaPlaybackMode(raw: unknown): MediaPlaybackMode {
 }
 
 function parseHlsHwAccel(raw: unknown): HlsHwAccel {
-  return raw === 'vaapi' ? 'vaapi' : 'software'
+  if (raw === 'vaapi' || raw === 'copy') return raw
+  return 'software'
 }
 
 export function parseMediaInfo(payload: unknown): MediaInfo {

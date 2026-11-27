@@ -174,14 +174,6 @@ async function handlePasswordSave(): Promise<void> {
       </div>
 
       <div class="flex shrink-0 items-center gap-1.5">
-        <span class="hidden items-center gap-1.5 px-1.5 text-[11px] text-white/85 sm:inline-flex">
-          <span
-            class="h-2 w-2 rounded-full"
-            :class="authStore.accessTier === 'private' ? 'bg-[#10b981]' : 'bg-[#60a5fa]'"
-          />
-          <span>{{ authStore.accessTier === 'private' ? 'Tailscale' : '외부 접속' }}</span>
-        </span>
-
         <button
           type="button"
           class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-[4px] transition-colors"

@@ -1662,6 +1662,14 @@ function handlePlaybackRateSelect(ev: Event): void {
         </span>
 
         <span
+          v-else-if="playbackState.kind === 'hls-ready' && playbackState.hwAccel === 'copy'"
+          class="inline-flex shrink-0 items-center gap-1 rounded-[3px] border border-[#bbf7d0] bg-[#f0fdf4] px-2 py-0.5 text-[11px] font-medium text-[#15803d]"
+        >
+          <Play class="h-3 w-3" />
+          비디오 복사 (오디오 변환)
+        </span>
+
+        <span
           v-else-if="playbackState.kind === 'hls-ready' && playbackState.hwAccel === 'vaapi'"
           class="inline-flex shrink-0 items-center gap-1 rounded-[3px] border border-[#99f6e4] bg-[#f0fdfa] px-2 py-0.5 text-[11px] font-medium text-[#0f766e]"
         >

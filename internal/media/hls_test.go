@@ -59,8 +59,13 @@ func TestHLSFilenameAndSessionValidation(t *testing.T) {
 }
 
 func TestBuildFFmpegHLSArgs(t *testing.T) {
-	vaapiArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", true, 0)
-	for _, required := range []string{"-hwaccel", "vaapi", "/dev/dri/renderD128", "h264_vaapi", "format=nv12|vaapi,hwupload", "/tmp/hls/abc/index.m3u8"} {
+	copyArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", "/dev/dri/renderD128", true, 0)
+	if !slices.Contains(copyArgs, "copy") || slices.Contains(copyArgs, "h264_vaapi") || slices.Contains(copyArgs, "libx264") {
+		t.Errorf("copyVideo args should use -c:v copy: %v", copyArgs)
+	}
+
+	vaapiArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", "/dev/dri/renderD128", false, 0)
+	for _, required := range []string{"-hwaccel", "vaapi", "/dev/dri/renderD128", "h264_vaapi", "-rc_mode", "CQP", "-qp", "format=nv12|vaapi,hwupload", "/tmp/hls/abc/index.m3u8"} {
 		if !slices.Contains(vaapiArgs, required) {
 			t.Errorf("VAAPI args missing %q: %v", required, vaapiArgs)
 		}
@@ -69,7 +74,7 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 		t.Errorf("zero startSec should not include -ss: %v", vaapiArgs)
 	}
 
-	swArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", false, 0)
+	swArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", "", false, 0)
 	for _, required := range []string{"libx264", "veryfast", "yuv420p", "/tmp/hls/abc/seg_%04d.ts", "/tmp/hls/abc/index.m3u8"} {
 		if !slices.Contains(swArgs, required) {
 			t.Errorf("software args missing %q: %v", required, swArgs)
@@ -79,7 +84,7 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 		t.Errorf("software args should not contain h264_vaapi: %v", swArgs)
 	}
 
-	seekSwArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", false, 125.5)
+	seekSwArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", "", false, 125.5)
 	ssIdx := slices.Index(seekSwArgs, "-ss")
 	iIdx := slices.Index(seekSwArgs, "-i")
 	if ssIdx == -1 || iIdx == -1 || ssIdx >= iIdx {
@@ -89,7 +94,7 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 		t.Errorf("expected -ss value 125.500, got %q", seekSwArgs[ssIdx+1])
 	}
 
-	seekVaapiArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", true, 90)
+	seekVaapiArgs := BuildFFmpegHLSArgs("/media/movie.mkv", "/tmp/hls/abc", "/dev/dri/renderD129", false, 90)
 	ssIdx = slices.Index(seekVaapiArgs, "-ss")
 	iIdx = slices.Index(seekVaapiArgs, "-i")
 	if ssIdx == -1 || iIdx == -1 || ssIdx >= iIdx {
@@ -97,5 +102,8 @@ func TestBuildFFmpegHLSArgs(t *testing.T) {
 	}
 	if seekVaapiArgs[ssIdx+1] != "90.000" {
 		t.Errorf("expected -ss value 90.000, got %q", seekVaapiArgs[ssIdx+1])
+	}
+	if !slices.Contains(seekVaapiArgs, "/dev/dri/renderD129") {
+		t.Errorf("expected custom VAAPI device path in args: %v", seekVaapiArgs)
 	}
 }

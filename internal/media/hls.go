@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -132,16 +133,28 @@ func IsValidHLSFile(name string) bool {
 	return name == "index.m3u8" || hlsSegmentPattern.MatchString(name)
 }
 
-func VAAPIAvailable() bool {
+func DetectVAAPIDevice() string {
 	if runtime.GOOS != "linux" {
-		return false
+		return ""
 	}
-	f, err := os.Open(vaapiDevicePath)
-	if err != nil {
-		return false
+	matches, err := filepath.Glob("/dev/dri/renderD*")
+	if err != nil || len(matches) == 0 {
+		matches = []string{vaapiDevicePath}
+	} else {
+		sort.Strings(matches)
 	}
-	_ = f.Close()
-	return true
+	for _, dev := range matches {
+		f, openErr := os.Open(dev)
+		if openErr == nil {
+			_ = f.Close()
+			return dev
+		}
+	}
+	return ""
+}
+
+func VAAPIAvailable() bool {
+	return DetectVAAPIDevice() != ""
 }
 
 func sanitizeStartSec(startSec float64) float64 {
@@ -151,16 +164,36 @@ func sanitizeStartSec(startSec float64) float64 {
 	return startSec
 }
 
-func BuildFFmpegHLSArgs(inputPath, outDir string, useVAAPI bool, startSec float64) []string {
+func BuildFFmpegHLSArgs(inputPath, outDir, vaapiDevice string, copyVideo bool, startSec float64) []string {
 	segPattern := filepath.Join(outDir, "seg_%04d.ts")
 	playlistPath := filepath.Join(outDir, "index.m3u8")
 	cleanStart := sanitizeStartSec(startSec)
 
-	if useVAAPI {
+	if copyVideo {
+		args := []string{"-y"}
+		if cleanStart > 0 {
+			args = append(args, "-ss", fmt.Sprintf("%.3f", cleanStart))
+		}
+		return append(args,
+			"-i", inputPath,
+			"-c:v", "copy",
+			"-c:a", "aac",
+			"-b:a", "192k",
+			"-ac", "2",
+			"-f", "hls",
+			"-hls_time", "4",
+			"-hls_list_size", "0",
+			"-hls_flags", "independent_segments",
+			"-hls_segment_filename", segPattern,
+			playlistPath,
+		)
+	}
+
+	if vaapiDevice != "" {
 		args := []string{
 			"-y",
 			"-hwaccel", "vaapi",
-			"-hwaccel_device", vaapiDevicePath,
+			"-hwaccel_device", vaapiDevice,
 			"-hwaccel_output_format", "vaapi",
 		}
 		if cleanStart > 0 {
@@ -170,7 +203,8 @@ func BuildFFmpegHLSArgs(inputPath, outDir string, useVAAPI bool, startSec float6
 			"-i", inputPath,
 			"-vf", "format=nv12|vaapi,hwupload",
 			"-c:v", "h264_vaapi",
-			"-b:v", "6M",
+			"-rc_mode", "CQP",
+			"-qp", "22",
 			"-c:a", "aac",
 			"-b:a", "192k",
 			"-ac", "2",
@@ -328,7 +362,7 @@ func (m *HLSManager) shutdownAll() {
 	}
 }
 
-func (m *HLSManager) StartSession(inputPath string, startSec float64) (string, string, float64, error) {
+func (m *HLSManager) StartSession(inputPath string, startSec float64, copyVideo bool) (string, string, float64, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return "", "", 0, errors.New("호스트에서 ffmpeg를 찾을 수 없습니다")
 	}
@@ -345,14 +379,19 @@ func (m *HLSManager) StartSession(inputPath string, startSec float64) (string, s
 		return "", "", 0, fmt.Errorf("create hls session dir: %w", err)
 	}
 
-	useVAAPI := VAAPIAvailable()
+	vaapiDevice := ""
 	hwAccel := "software"
-	if useVAAPI {
-		hwAccel = "vaapi"
+	if copyVideo {
+		hwAccel = "copy"
+	} else {
+		vaapiDevice = DetectVAAPIDevice()
+		if vaapiDevice != "" {
+			hwAccel = "vaapi"
+		}
 	}
 
 	procCtx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(procCtx, "ffmpeg", BuildFFmpegHLSArgs(inputPath, dir, useVAAPI, cleanStart)...)
+	cmd := exec.CommandContext(procCtx, "ffmpeg", BuildFFmpegHLSArgs(inputPath, dir, vaapiDevice, copyVideo, cleanStart)...)
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = os.RemoveAll(dir)
@@ -376,7 +415,7 @@ func (m *HLSManager) StartSession(inputPath string, startSec float64) (string, s
 	m.mu.Unlock()
 
 	startedAt := time.Now()
-	go m.superviseSession(sess, procCtx, cmd, useVAAPI, startedAt)
+	go m.superviseSession(sess, procCtx, cmd, vaapiDevice != "" || copyVideo, startedAt)
 
 	return id, hwAccel, cleanStart, nil
 }
@@ -401,7 +440,7 @@ func (m *HLSManager) superviseSession(sess *hlsSession, procCtx context.Context,
 
 	playlistPath := filepath.Join(sess.dir, "index.m3u8")
 	if usedVAAPI && time.Since(startedAt) <= vaapiFallbackSpan && !playlistHasSegments(playlistPath) {
-		swCmd := exec.CommandContext(procCtx, "ffmpeg", BuildFFmpegHLSArgs(sess.inputPath, sess.dir, false, sess.startSec)...)
+		swCmd := exec.CommandContext(procCtx, "ffmpeg", BuildFFmpegHLSArgs(sess.inputPath, sess.dir, "", false, sess.startSec)...)
 		if startErr := swCmd.Start(); startErr == nil {
 			sess.mu.Lock()
 			if sess.stopped {
@@ -479,7 +518,10 @@ func (h *Handler) handleHLSStart(accessTier string) http.HandlerFunc {
 			return
 		}
 
-		sessionID, hwAccel, startSec, err := h.hls.StartSession(realPath, req.StartSec)
+		probe := ProbeMedia(r.Context(), realPath)
+		copyVideo := probe.VideoCodec == "h264"
+
+		sessionID, hwAccel, startSec, err := h.hls.StartSession(realPath, req.StartSec, copyVideo)
 		if err != nil {
 			httputil.WriteError(w, http.StatusInternalServerError, err.Error())
 			return

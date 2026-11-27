@@ -42,7 +42,11 @@ type Dependencies struct {
 }
 
 func NewPublicRouter(deps Dependencies) http.Handler {
-	return buildRouter(deps, "public")
+	tier := "public"
+	if deps.Config.Server.AllowPublicAdmin {
+		tier = "private"
+	}
+	return buildRouter(deps, tier)
 }
 
 func NewPrivateRouter(deps Dependencies) http.Handler {

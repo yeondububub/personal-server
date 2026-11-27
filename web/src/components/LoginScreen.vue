@@ -96,13 +96,6 @@ async function handleSubmit(): Promise<void> {
 
     <div class="pointer-events-none absolute bottom-5 left-6 z-10 select-none text-[12px] text-white/80">
       <div class="font-semibold tracking-tight text-white/90">Personal NAS</div>
-      <div class="mt-0.5 flex items-center gap-1.5 text-white/80">
-        <span
-          class="inline-block h-2 w-2 rounded-full"
-          :class="authStore.accessTier === 'private' ? 'bg-[#10b981]' : 'bg-[#60a5fa]'"
-        />
-        <span>{{ authStore.accessTier === 'private' ? 'Tailscale 내부 관리망' : '외부 접속' }}</span>
-      </div>
     </div>
   </div>
 </template>

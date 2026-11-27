@@ -18,10 +18,11 @@ type MountRoot struct {
 }
 
 type ServerConfig struct {
-	PublicAddr    string `yaml:"public_addr"`
-	PrivateAddr   string `yaml:"private_addr"`
-	PublicBaseURL string `yaml:"public_base_url"`
-	CookieSecure  bool   `yaml:"cookie_secure"`
+	PublicAddr       string `yaml:"public_addr"`
+	PrivateAddr      string `yaml:"private_addr"`
+	PublicBaseURL    string `yaml:"public_base_url"`
+	CookieSecure     bool   `yaml:"cookie_secure"`
+	AllowPublicAdmin bool   `yaml:"allow_public_admin"`
 }
 
 type StorageConfig struct {
@@ -128,10 +129,6 @@ func Load(path string) (Config, error) {
 			cfg.Wargame.WorkDir = wgReal
 		}
 	}
-	if len(cfg.Storage.Roots) == 0 {
-		return Config{}, errors.New("storage.roots must contain at least one directory")
-	}
-
 	if err := os.MkdirAll(filepath.Dir(cfg.Storage.DatabasePath), 0o755); err != nil {
 		return Config{}, fmt.Errorf("create db dir: %w", err)
 	}
