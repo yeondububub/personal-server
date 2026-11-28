@@ -153,6 +153,23 @@ function sizeClass(size: 'xs' | 'sm' | 'md' | 'lg'): string {
       <path d="M27.5 23.5L42 32l-14.5 8.5V23.5z" fill="#FFFFFF" />
     </svg>
 
+    <!-- Settings: Synology Control Panel slate-blue gear -->
+    <svg v-else-if="appId === 'settings'" viewBox="0 0 64 64" class="h-full w-full drop-shadow-sm">
+      <defs>
+        <linearGradient id="st-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#64748B" />
+          <stop offset="100%" stop-color="#334155" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#st-bg)" />
+      <path
+        d="M32 18.5l2.6 3.5 4.3-.7 1.1 4.2 4 1.6-1.1 4.2 2.6 3.5-2.6 3.5 1.1 4.2-4 1.6-1.1 4.2-4.3-.7L32 45.5l-2.6-3.5-4.3.7-1.1-4.2-4-1.6 1.1-4.2-2.6-3.5 2.6-3.5-1.1-4.2 4-1.6 1.1-4.2 4.3.7L32 18.5z"
+        fill="#E2E8F0"
+      />
+      <circle cx="32" cy="32" r="6.5" fill="#334155" />
+      <circle cx="32" cy="32" r="2.8" fill="#38BDF8" />
+    </svg>
+
     <!-- Text / Code Editor: Synology Text Editor sheet + blue header -->
     <svg v-else viewBox="0 0 64 64" class="h-full w-full drop-shadow-sm">
       <rect x="4" y="4" width="56" height="56" rx="14" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1" />

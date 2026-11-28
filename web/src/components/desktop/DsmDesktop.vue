@@ -4,12 +4,13 @@ import { Lock } from 'lucide-vue-next'
 import { useAuthStore } from '../../stores/auth'
 import { DESKTOP_APPS, useDesktopStore, type DesktopAppDefinition } from '../../stores/desktop'
 import { useMountsStore } from '../../stores/mounts'
+import { useSettingsStore } from '../../stores/settings'
 import { api } from '../../api/client'
 import type { MonitorSnapshot } from '../../types/api'
 import { formatBytes, formatDuration } from '../../utils/format'
 import DsmAppIcon from './DsmAppIcon.vue'
 import DsmTaskbar from './DsmTaskbar.vue'
-import DsmWallpaper, { type DsmWallpaperTheme } from './DsmWallpaper.vue'
+import DsmWallpaper from './DsmWallpaper.vue'
 import DsmWindow from './DsmWindow.vue'
 import FileStationApp from '../../apps/file-station/FileStationApp.vue'
 import VideoPlayerApp from '../../apps/video-player/VideoPlayerApp.vue'
@@ -19,47 +20,18 @@ import DockerManagerApp from '../../apps/docker-manager/DockerManagerApp.vue'
 import MonitorApp from '../../apps/monitor/MonitorApp.vue'
 import WargameRunnerApp from '../../apps/wargame/WargameRunnerApp.vue'
 import WebTerminalApp from '../../apps/terminal/WebTerminalApp.vue'
-
-const WALLPAPER_STORAGE_KEY = 'ps_dsm_wallpaper'
-
-function parseWallpaperTheme(raw: string | null): DsmWallpaperTheme {
-  switch (raw) {
-    case 'ocean':
-    case 'mist':
-    case 'slate':
-      return raw
-    default:
-      return 'ocean'
-  }
-}
-
-function loadInitialWallpaper(): DsmWallpaperTheme {
-  try {
-    return parseWallpaperTheme(localStorage.getItem(WALLPAPER_STORAGE_KEY))
-  } catch {
-    return 'ocean'
-  }
-}
+import SettingsApp from '../../apps/settings/SettingsApp.vue'
 
 const authStore = useAuthStore()
 const desktopStore = useDesktopStore()
 const mountsStore = useMountsStore()
+const settingsStore = useSettingsStore()
 
-const wallpaperTheme = ref<DsmWallpaperTheme>(loadInitialWallpaper())
 const widgetOpen = ref(true)
 const snapshot = ref<MonitorSnapshot | null>(null)
 const toastMessage = ref('')
 let snapshotTimer: ReturnType<typeof setInterval> | null = null
 let toastTimer: ReturnType<typeof setTimeout> | null = null
-
-function handleChangeWallpaper(theme: DsmWallpaperTheme): void {
-  wallpaperTheme.value = theme
-  try {
-    localStorage.setItem(WALLPAPER_STORAGE_KEY, theme)
-  } catch {
-    return
-  }
-}
 
 function handleToggleWidget(): void {
   widgetOpen.value = !widgetOpen.value
@@ -124,6 +96,9 @@ function handleLaunchApp(app: DesktopAppDefinition): void {
     case 'monitor':
       desktopStore.openWindow({ title: app.title, payload: { kind: 'monitor' } })
       return
+    case 'settings':
+      desktopStore.openWindow({ title: app.title, payload: { kind: 'settings' } })
+      return
     case 'video-player':
     case 'code-editor':
       return
@@ -157,14 +132,15 @@ function diskUsedBytes(total: number, free: number): number {
 
 <template>
   <div class="relative flex h-full w-full flex-col overflow-hidden bg-[#0b3b6e]">
-    <DsmWallpaper :theme="wallpaperTheme" />
+    <DsmWallpaper
+      :theme="settingsStore.wallpaperPreset"
+      :custom-url="settingsStore.wallpaperMode === 'custom' ? settingsStore.customWallpaperUrl : null"
+    />
 
     <DsmTaskbar
-      :wallpaper-theme="wallpaperTheme"
       :widget-open="widgetOpen"
       @launch-app="handleLaunchApp"
       @toggle-widget="handleToggleWidget"
-      @change-wallpaper="handleChangeWallpaper"
     />
 
     <main class="relative flex-1 overflow-hidden">
@@ -323,6 +299,7 @@ function diskUsedBytes(total: number, free: number): number {
           v-else-if="win.payload.kind === 'terminal'"
           :initial-target="win.payload.initialTarget"
         />
+        <SettingsApp v-else-if="win.payload.kind === 'settings'" />
       </DsmWindow>
 
       <div

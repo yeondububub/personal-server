@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { useSettingsStore } from '../stores/settings'
 import DsmWallpaper from './desktop/DsmWallpaper.vue'
 
 const authStore = useAuthStore()
+const settingsStore = useSettingsStore()
 
 const username = ref('admin')
 const password = ref('')
@@ -32,13 +34,18 @@ async function handleSubmit(): Promise<void> {
 
 <template>
   <div class="relative flex h-full w-full items-center justify-center overflow-hidden bg-[#0b3b6e] p-4">
-    <DsmWallpaper theme="ocean" />
+    <DsmWallpaper
+      :theme="settingsStore.wallpaperPreset"
+      :custom-url="settingsStore.wallpaperMode === 'custom' ? settingsStore.customWallpaperUrl : null"
+    />
 
     <div
       class="relative z-10 w-[360px] max-w-full rounded-[8px] border border-white/60 bg-white/95 p-8 text-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.35)]"
     >
       <div class="mb-6">
-        <h1 class="text-[20px] leading-tight font-semibold tracking-tight text-[#1e293b]">Ubuntu-DSM</h1>
+        <h1 class="text-[20px] leading-tight font-semibold tracking-tight text-[#1e293b]">
+          {{ settingsStore.siteTitle }}
+        </h1>
         <p class="mt-1 text-[12px] text-[#64748b]">계정에 로그인</p>
       </div>
 

@@ -1,5 +1,6 @@
 import {
   extractErrorMessage,
+  parseAppSettings,
   parseAuthStatus,
   parseCreatedShare,
   parseDockerContainerInspect,
@@ -28,7 +29,9 @@ import {
   parseWargameInstance,
   parseWargameList,
   parseWargameLogs,
+  type AppSettings,
   type AuthStatus,
+  type ClockFormat,
   type DockerContainer,
   type DockerContainerInspect,
   type DockerImage,
@@ -56,6 +59,8 @@ import {
   type WargameListResult,
   type WargameLogsResult,
   type WargameTemplateKind,
+  type WallpaperMode,
+  type WallpaperPreset,
 } from '../types/api'
 
 function buildWsUrl(path: string, qs?: URLSearchParams): string {
@@ -101,6 +106,63 @@ async function requestTextOrJSON(url: string, init?: RequestInit): Promise<strin
 }
 
 export const api = {
+  async fetchPublicSettings(): Promise<AppSettings> {
+    const raw = await requestJSON('/api/public/settings')
+    return parseAppSettings(raw)
+  },
+
+  async updateSettings(params: {
+    readonly siteTitle?: string
+    readonly clockFormat?: ClockFormat
+    readonly wallpaperMode?: WallpaperMode
+    readonly wallpaperPreset?: WallpaperPreset
+  }): Promise<AppSettings> {
+    const raw = await requestJSON('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    })
+    return parseAppSettings(raw)
+  },
+
+  async uploadFavicon(file: File): Promise<AppSettings> {
+    const fd = new FormData()
+    fd.append('file', file)
+    const raw = await requestJSON('/api/settings/favicon', {
+      method: 'POST',
+      body: fd,
+    })
+    return parseAppSettings(raw)
+  },
+
+  async deleteFavicon(): Promise<AppSettings> {
+    const raw = await requestJSON('/api/settings/favicon', { method: 'DELETE' })
+    return parseAppSettings(raw)
+  },
+
+  async uploadWallpaper(file: File): Promise<AppSettings> {
+    const fd = new FormData()
+    fd.append('file', file)
+    const raw = await requestJSON('/api/settings/wallpaper', {
+      method: 'POST',
+      body: fd,
+    })
+    return parseAppSettings(raw)
+  },
+
+  async deleteWallpaper(): Promise<AppSettings> {
+    const raw = await requestJSON('/api/settings/wallpaper', { method: 'DELETE' })
+    return parseAppSettings(raw)
+  },
+
+  customFaviconUrl(version: number): string {
+    return `/api/public/settings/favicon?v=${encodeURIComponent(String(version))}`
+  },
+
+  customWallpaperUrl(version: number): string {
+    return `/api/public/settings/wallpaper?v=${encodeURIComponent(String(version))}`
+  },
+
   async fetchMe(): Promise<AuthStatus> {
     const raw = await requestJSON('/api/auth/me')
     return parseAuthStatus(raw)

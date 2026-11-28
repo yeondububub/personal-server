@@ -4,18 +4,25 @@ export type DsmWallpaperTheme = 'ocean' | 'mist' | 'slate'
 withDefaults(
   defineProps<{
     readonly theme?: DsmWallpaperTheme
+    readonly customUrl?: string | null
   }>(),
   {
     theme: 'ocean',
+    customUrl: null,
   },
 )
 </script>
 
 <template>
   <div class="pointer-events-none absolute inset-0 overflow-hidden select-none">
+    <template v-if="customUrl">
+      <img :src="customUrl" alt="" class="h-full w-full object-cover" />
+      <div class="absolute inset-0 bg-black/15" />
+    </template>
+
     <!-- Theme 1: Iconic Synology DSM 7.2 Ocean Silk Wave -->
     <svg
-      v-if="theme === 'ocean'"
+      v-else-if="theme === 'ocean'"
       viewBox="0 0 1600 900"
       preserveAspectRatio="xMidYMid slice"
       class="h-full w-full"

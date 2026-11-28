@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useAuthStore } from './stores/auth'
+import { useSettingsStore } from './stores/settings'
 import LoginScreen from './components/LoginScreen.vue'
 import PublicShareView from './components/PublicShareView.vue'
 import DsmDesktop from './components/desktop/DsmDesktop.vue'
 
 const authStore = useAuthStore()
+const settingsStore = useSettingsStore()
 
 const shareToken = computed<string | null>(() => {
   const path = window.location.pathname
@@ -15,6 +17,7 @@ const shareToken = computed<string | null>(() => {
 })
 
 onMounted(() => {
+  void settingsStore.loadPublic()
   if (!shareToken.value) {
     void authStore.refreshSession()
   }

@@ -1,31 +1,24 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { Check, KeyRound, Lock, LogOut, X } from 'lucide-vue-next'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { KeyRound, Lock, LogOut, X } from 'lucide-vue-next'
 import { useAuthStore } from '../../stores/auth'
 import { DESKTOP_APPS, useDesktopStore, type DesktopAppDefinition } from '../../stores/desktop'
+import { useSettingsStore } from '../../stores/settings'
 import { api } from '../../api/client'
 import DsmAppIcon from './DsmAppIcon.vue'
-import type { DsmWallpaperTheme } from './DsmWallpaper.vue'
 
 const props = defineProps<{
-  readonly wallpaperTheme: DsmWallpaperTheme
   readonly widgetOpen: boolean
 }>()
 
 const emit = defineEmits<{
   launchApp: [app: DesktopAppDefinition]
   toggleWidget: []
-  changeWallpaper: [theme: DsmWallpaperTheme]
 }>()
-
-const WALLPAPER_OPTIONS: readonly { readonly id: DsmWallpaperTheme; readonly label: string }[] = [
-  { id: 'ocean', label: '오션 블루' },
-  { id: 'mist', label: '노르딕 미스트' },
-  { id: 'slate', label: '딥 슬레이트' },
-]
 
 const authStore = useAuthStore()
 const desktopStore = useDesktopStore()
+const settingsStore = useSettingsStore()
 
 const launcherOpen = ref(false)
 const searchQuery = ref('')
@@ -50,11 +43,24 @@ const filteredApps = computed(() => {
 })
 
 function updateClock(): void {
-  clockText.value = new Date().toLocaleTimeString('ko-KR', {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  const timeStr = now.toLocaleTimeString('ko-KR', {
     hour: '2-digit',
     minute: '2-digit',
+    hour12: settingsStore.clockFormat === '12h',
   })
+  clockText.value = `${y}-${m}-${d} ${timeStr}`
 }
+
+watch(
+  () => settingsStore.clockFormat,
+  () => {
+    updateClock()
+  },
+)
 
 function closeLauncher(): void {
   launcherOpen.value = false
@@ -99,10 +105,6 @@ onUnmounted(() => {
 function handleSelectApp(app: DesktopAppDefinition): void {
   closeLauncher()
   emit('launchApp', app)
-}
-
-function handleSelectWallpaper(theme: DsmWallpaperTheme): void {
-  emit('changeWallpaper', theme)
 }
 
 async function handleLogout(): Promise<void> {
@@ -216,7 +218,7 @@ async function handlePasswordSave(): Promise<void> {
           <span>{{ authStore.username }}</span>
         </button>
 
-        <span class="pl-1 text-[12px] tabular-nums text-white/90">{{ clockText }}</span>
+        <span class="whitespace-nowrap pl-1 text-[12px] tabular-nums text-white/90">{{ clockText }}</span>
       </div>
     </header>
 
@@ -228,22 +230,8 @@ async function handlePasswordSave(): Promise<void> {
 
     <div
       v-if="userMenuOpen"
-      class="absolute top-10 right-2.5 z-40 w-52 rounded-[6px] border border-slate-200 bg-white py-1 text-[12px] text-slate-800 shadow-xl"
+      class="absolute top-10 right-2.5 z-40 w-48 rounded-[6px] border border-slate-200 bg-white py-1 text-[12px] text-slate-800 shadow-xl"
     >
-      <div class="px-3 py-1.5 text-[11px] font-semibold text-[#64748b]">배경화면</div>
-      <button
-        v-for="opt in WALLPAPER_OPTIONS"
-        :key="opt.id"
-        type="button"
-        class="flex w-full cursor-pointer items-center justify-between px-3 py-1.5 text-left text-[#1e293b] hover:bg-[#f1f5f9]"
-        @click="handleSelectWallpaper(opt.id)"
-      >
-        <span>{{ opt.label }}</span>
-        <Check v-if="props.wallpaperTheme === opt.id" class="h-3.5 w-3.5 text-[#0572ec]" />
-      </button>
-
-      <div class="my-1 border-t border-slate-200" />
-
       <button
         type="button"
         class="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[#1e293b] hover:bg-[#f1f5f9]"

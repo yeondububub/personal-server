@@ -2,6 +2,20 @@ export type AccessTier = 'public' | 'private'
 
 export type FileKind = 'dir' | 'video' | 'audio' | 'image' | 'code' | 'archive' | 'file'
 
+export type ClockFormat = '12h' | '24h'
+export type WallpaperMode = 'preset' | 'custom'
+export type WallpaperPreset = 'ocean' | 'mist' | 'slate'
+
+export interface AppSettings {
+  readonly siteTitle: string
+  readonly clockFormat: ClockFormat
+  readonly wallpaperMode: WallpaperMode
+  readonly wallpaperPreset: WallpaperPreset
+  readonly hasCustomWallpaper: boolean
+  readonly hasCustomFavicon: boolean
+  readonly updatedAt: number
+}
+
 export interface UserInfo {
   readonly id: number
   readonly username: string
@@ -368,6 +382,29 @@ export function extractErrorMessage(payload: unknown, fallback: string): string 
     return payload.error
   }
   return fallback
+}
+
+export function parseAppSettings(payload: unknown): AppSettings {
+  if (!isRecord(payload)) {
+    throw new Error('유효하지 않은 설정 응답입니다.')
+  }
+  const rawClock = readString(payload, 'clockFormat', '24h')
+  const clockFormat: ClockFormat = rawClock === '12h' ? '12h' : '24h'
+  const rawMode = readString(payload, 'wallpaperMode', 'preset')
+  const wallpaperMode: WallpaperMode = rawMode === 'custom' ? 'custom' : 'preset'
+  const rawPreset = readString(payload, 'wallpaperPreset', 'ocean')
+  const wallpaperPreset: WallpaperPreset =
+    rawPreset === 'mist' || rawPreset === 'slate' ? rawPreset : 'ocean'
+
+  return {
+    siteTitle: readString(payload, 'siteTitle', 'Personal Server') || 'Personal Server',
+    clockFormat,
+    wallpaperMode,
+    wallpaperPreset,
+    hasCustomWallpaper: readBoolean(payload, 'hasCustomWallpaper'),
+    hasCustomFavicon: readBoolean(payload, 'hasCustomFavicon'),
+    updatedAt: readNumber(payload, 'updatedAt'),
+  }
 }
 
 export function parseAuthStatus(payload: unknown): AuthStatus {

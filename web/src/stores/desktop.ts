@@ -10,6 +10,7 @@ export type AppId =
   | 'wargame'
   | 'terminal'
   | 'monitor'
+  | 'settings'
 
 export interface WargameLaunchSource {
   readonly rootId: string
@@ -34,6 +35,7 @@ export type WindowPayload =
   | { readonly kind: 'wargame'; readonly launchSource?: WargameLaunchSource }
   | { readonly kind: 'terminal'; readonly initialTarget?: TerminalLaunchTarget }
   | { readonly kind: 'monitor' }
+  | { readonly kind: 'settings' }
 
 export interface DesktopAppDefinition {
   readonly id: AppId
@@ -120,6 +122,15 @@ export const DESKTOP_APPS: readonly DesktopAppDefinition[] = [
     defaultWidth: 840,
     defaultHeight: 560,
   },
+  {
+    id: 'settings',
+    title: '설정',
+    subtitle: '탭 이름, 파비콘, 배경화면 및 시계 형식',
+    requiresPrivate: false,
+    showOnDesktop: true,
+    defaultWidth: 760,
+    defaultHeight: 540,
+  },
 ]
 
 export interface WindowInstance {
@@ -177,6 +188,7 @@ export const useDesktopStore = defineStore('desktop', () => {
         case 'wargame':
         case 'terminal':
         case 'monitor':
+        case 'settings':
           return true
         case 'video-player':
           return (

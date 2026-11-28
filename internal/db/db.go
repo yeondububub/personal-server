@@ -93,6 +93,12 @@ CREATE TABLE IF NOT EXISTS wargame_instances (
 );
 
 CREATE INDEX IF NOT EXISTS idx_wargame_expires ON wargame_instances(expires_at);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 `
 	if _, err := conn.Exec(schema); err != nil {
 		return fmt.Errorf("migrate sqlite schema: %w", err)

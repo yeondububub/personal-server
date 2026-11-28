@@ -22,6 +22,7 @@ import (
 	"personal-server/internal/monitor"
 	"personal-server/internal/mounts"
 	"personal-server/internal/server"
+	"personal-server/internal/settings"
 	"personal-server/internal/share"
 	"personal-server/internal/terminal"
 	"personal-server/internal/wargame"
@@ -70,6 +71,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("init docker service: %v", err)
 	}
+	brandingDir := filepath.Join(filepath.Dir(cfg.Storage.DatabasePath), "branding")
+	settingsSvc, err := settings.NewService(conn, brandingDir)
+	if err != nil {
+		log.Fatalf("init settings service: %v", err)
+	}
 
 	webFS, err := personalserver.WebDistFS()
 	if err != nil {
@@ -94,6 +100,7 @@ func main() {
 		Monitor:  monitorSvc,
 		Terminal: terminalHandler,
 		Docker:   dockerSvc,
+		Settings: settingsSvc,
 		WebDist:  webFS,
 		Started:  started,
 	}

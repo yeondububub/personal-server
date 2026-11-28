@@ -20,6 +20,7 @@ import (
 	"personal-server/internal/media"
 	"personal-server/internal/monitor"
 	"personal-server/internal/mounts"
+	"personal-server/internal/settings"
 	"personal-server/internal/share"
 	"personal-server/internal/terminal"
 	"personal-server/internal/wargame"
@@ -37,6 +38,7 @@ type Dependencies struct {
 	Monitor  *monitor.Service
 	Terminal *terminal.Handler
 	Docker   *docker.Service
+	Settings *settings.Service
 	WebDist  fs.FS
 	Started  time.Time
 }
@@ -71,6 +73,9 @@ func buildRouter(deps Dependencies, accessTier string) http.Handler {
 		api.Get("/auth/me", deps.Auth.HandleMe(accessTier))
 
 		api.Mount("/public/shares", deps.Share.PublicRoutes())
+		if deps.Settings != nil {
+			api.Mount("/public/settings", deps.Settings.PublicRoutes())
+		}
 
 		api.Group(func(authed chi.Router) {
 			authed.Use(deps.Auth.RequireAuth)
@@ -78,6 +83,9 @@ func buildRouter(deps Dependencies, accessTier string) http.Handler {
 			authed.Mount("/files", deps.Files.Routes(accessTier))
 			authed.Mount("/media", deps.Media.Routes(accessTier))
 			authed.Mount("/shares", deps.Share.AdminRoutes())
+			if deps.Settings != nil {
+				authed.Mount("/settings", deps.Settings.AdminRoutes())
+			}
 			if deps.Monitor != nil {
 				authed.Mount("/monitor", deps.Monitor.Routes(accessTier))
 			}
